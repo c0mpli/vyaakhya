@@ -1,7 +1,4 @@
-#include <WiFi.h>
 #include "BLEDevice.h"
-#include <stdlib.h>
-#include <time.h>
 
 #define CUSTOM_SERVICE_UUID      "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_RX   "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -16,33 +13,6 @@ BLEAdvertData advdata;
 BLEAdvertData scndata;
 
 bool notify = false;
-bool deviceConnected = false;
-
-char ssid[] = "IoT_Hotspot";
-char password[13]; // 12 characters + null terminator
-
-void generatePassword() {
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    srand(time(NULL));
-    for (int i = 0; i < 12; i++) {
-        password[i] = charset[rand() % (sizeof(charset) - 1)];
-    }
-    password[12] = '\0';
-}
-
-void setupWiFiAP() {
-    generatePassword();
-    Serial.println("Setting up WiFi Access Point...");
-    int result = WiFi.apbegin(ssid, password);
-    if (result == WL_CONNECTED) {
-        Serial.println("Access Point setup successful.");
-        Serial.print("AP IP address: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println("Failed to set up Access Point.");
-        while (true); // Stop execution
-    }
-}
 
 void readCB(BLECharacteristic* chr, uint8_t connID) {
     Serial.print("Characteristic ");
@@ -74,8 +44,6 @@ void notifCB(BLECharacteristic* chr, uint8_t connID, uint16_t cccd) {
 void setup() {
     Serial.begin(115200);
     Serial.println("BLE Custom Service Example");
-
-    setupWiFiAP();
 
     // Configure advertising data
     advdata.addFlags(GAP_ADTYPE_FLAGS_LIMITED | GAP_ADTYPE_FLAGS_BREDR_NOT_SUPPORTED);
@@ -113,21 +81,6 @@ void setup() {
 }
 
 void loop() {
-    if (BLE.connected(0) && !deviceConnected) {
-        delay(2000);
-        deviceConnected = true;
-        String wifiInfo = String(ssid) + "," + String(password);
-        Tx.writeString(wifiInfo);
-        Serial.println("Device connected. Sending WiFi credentials:");
-        Serial.println(wifiInfo);
-        if (notify) {
-            Tx.notify(0);
-        }
-    } else if (!BLE.connected(0) && deviceConnected) {
-        deviceConnected = false;
-        Serial.println("Device disconnected");
-    }
-
     if (Serial.available()) {
         String message = Serial.readString();
         Tx.writeString(message);
