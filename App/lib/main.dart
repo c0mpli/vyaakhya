@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:wifi_iot/wifi_iot.dart';
 import 'dart:convert';
 
 void main() {
@@ -30,7 +31,9 @@ class _BleScreenState extends State<BleScreen> {
   BluetoothDevice? connectedDevice;
   BluetoothCharacteristic? targetCharacteristic;
   String? ssid;
-  String? password;
+  String? bssid;
+  bool isConnectingWifi = false;
+  String wifiStatus = '';
 
   @override
   void initState() {
@@ -49,12 +52,19 @@ class _BleScreenState extends State<BleScreen> {
     if (status.values.every((status) => status.isGranted)) {
       startScan();
     } else {
-      // Handle permission denied
       print("Permissions not granted");
     }
   }
 
   void startScan() {
+    setState(() {
+      scanResults.clear(); // Clear previous results
+      connectedDevice = null; // Reset connected device
+      ssid = null; // Reset SSID
+      bssid = null;
+      wifiStatus = ''; // Reset Wi-Fi status
+    });
+
     FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
     FlutterBluePlus.scanResults.listen((results) {
       setState(() {
@@ -69,22 +79,42 @@ class _BleScreenState extends State<BleScreen> {
 
   void connectToDevice(BluetoothDevice device) async {
     int attempts = 0;
+
+    Future<BluetoothConnectionState> getCurrentConnectionState(
+        BluetoothDevice device) async {
+      return await device.connectionState.first;
+    }
+
     while (attempts < 3) {
       try {
-        await device
-            .disconnect(); // Ensure the device is disconnected before trying to connect
+        BluetoothConnectionState connectionState =
+            await getCurrentConnectionState(device);
+
+        if (connectionState == BluetoothConnectionState.connected) {
+          setState(() {
+            connectedDevice = device;
+          });
+          await discoverServices(device);
+          //sendMessage("ready"); // Add this line
+
+          break;
+        }
+
         await device.connect();
         setState(() {
           connectedDevice = device;
         });
         await discoverServices(device);
-        break; // Exit loop if connection is successful
+        break;
       } catch (e) {
         print("Failed to connect: $e");
         attempts++;
-        await Future.delayed(
-            const Duration(seconds: 2)); // Wait before retrying
+        await Future.delayed(const Duration(seconds: 2));
       }
+    }
+
+    if (attempts == 3) {
+      print("Failed to connect after 3 attempts");
     }
   }
 
@@ -101,7 +131,7 @@ class _BleScreenState extends State<BleScreen> {
         if (service.uuid.toString() == ServiceUUIDToMatch) {
           for (BluetoothCharacteristic characteristic
               in service.characteristics) {
-            print("Characteristic $characteristic");
+            //print("Characteristic $characteristic");
             if (characteristic.characteristicUuid.toString() ==
                 CharacteristicUUIDToMatch) {
               if (characteristic.properties.write ||
@@ -115,6 +145,7 @@ class _BleScreenState extends State<BleScreen> {
               if (characteristic.properties.notify) {
                 print("Setting notify value");
                 await characteristic.setNotifyValue(true);
+                sendMessage("ready");
                 characteristic.onValueReceived.listen((value) {
                   print("Received value: $value");
                   _handleReceivedValue(value);
@@ -132,20 +163,82 @@ class _BleScreenState extends State<BleScreen> {
   void _handleReceivedValue(List<int> value) {
     print("Received value: $value");
     String receivedString = utf8.decode(value);
-    List<String> parts = receivedString.split(',');
-    if (parts.length == 2) {
+    List<String> split = receivedString.split('|');
+    print("Received split: $split");
+
+    setState(() {
+      ssid = split[0];
+      bssid = split[1];
+    });
+    _connectToWifi();
+  }
+
+  Future<void> _connectToWifi() async {
+    if (ssid == null || ssid!.isEmpty) {
+      if (bssid == null || bssid!.isEmpty) {
+        setState(() {
+          wifiStatus = 'BSSID & SSID is missing';
+        });
+        return;
+      }
       setState(() {
-        ssid = parts[0];
-        password = parts[1];
+        wifiStatus = 'SSID is missing';
+      });
+      return;
+    }
+
+    setState(() {
+      isConnectingWifi = true;
+      wifiStatus = 'Connecting to Wi-Fi...';
+    });
+
+    try {
+      await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: false);
+
+      print("Connecting to $ssid $bssid");
+      bool success = await WiFiForIoTPlugin.connect(ssid!,
+          bssid: bssid!, security: NetworkSecurity.NONE, timeoutInSeconds: 30);
+      print("Connection result: $success");
+      if (success) {
+        // Wait for a moment to ensure connection is stable
+        await Future.delayed(const Duration(seconds: 2));
+
+        // Double-check if we're actually connected
+        //final info = NetworkInfo();
+        //String? connectedSSID = await info.getWifiName();
+
+        if (success) {
+          setState(() {
+            wifiStatus = 'Connected to $ssid';
+          });
+        } else {
+          setState(() {
+            wifiStatus = 'Connection verified failed.';
+          });
+        }
+      } else {
+        setState(() {
+          wifiStatus = 'Failed to connect to $ssid';
+        });
+      }
+    } catch (e) {
+      print("Detailed error: $e");
+      setState(() {
+        wifiStatus = 'Error connecting to Wi-Fi: $e';
+      });
+    } finally {
+      setState(() {
+        isConnectingWifi = false;
       });
     }
   }
 
-  void sendMessage() async {
+  void sendMessage(String message) async {
+    print('Sending message to device $message');
     if (targetCharacteristic != null) {
       try {
         print('Sending message');
-        List<int> value = utf8.encode("Hi");
+        List<int> value = utf8.encode(message);
         if (targetCharacteristic!.properties.write) {
           await targetCharacteristic!.write(value, withoutResponse: false);
         } else if (targetCharacteristic!.properties.writeWithoutResponse) {
@@ -165,42 +258,61 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('BLE Demo'),
       ),
-      body: connectedDevice == null
-          ? ListView.builder(
-              itemCount: scanResults.length,
-              itemBuilder: (context, index) {
-                ScanResult result = scanResults[index];
-                return ListTile(
-                  title: Text(result.device.platformName.isEmpty
-                      ? "Unnamed"
-                      : result.device.platformName),
-                  subtitle: Text(result.device.remoteId.toString()),
-                  onTap: () => connectToDevice(result.device),
-                );
-              },
-            )
-          : Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Text('Connected to ${connectedDevice!.platformName}'),
-                const SizedBox(height: 20),
-                if (ssid != null && password != null) ...[
-                  Text('Hotspot SSID: $ssid'),
-                  Text('Hotspot Password: $password'),
-                  const SizedBox(height: 20),
-                ],
-                ElevatedButton(
-                  onPressed: sendMessage,
-                  child: const Text('Send Hi'),
-                ),
-              ],
-            ),
+      body: Column(
+        children: [
+          ElevatedButton(
+            onPressed: startScan,
+            child: const Text('Refresh'),
+          ),
+          Expanded(
+            child: connectedDevice == null
+                ? ListView.builder(
+                    itemCount: scanResults.length,
+                    itemBuilder: (context, index) {
+                      ScanResult result = scanResults[index];
+                      return ListTile(
+                        title: Text(result.device.platformName.isEmpty
+                            ? "Unnamed"
+                            : result.device.platformName),
+                        subtitle: Text(result.device.remoteId.toString()),
+                        onTap: () => connectToDevice(result.device),
+                      );
+                    },
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text('Connected to ${connectedDevice!.platformName}'),
+                      const SizedBox(height: 20),
+                      if (ssid != null) ...[
+                        Text('Hotspot SSID: $ssid'),
+                        const SizedBox(height: 20),
+                        Text('Wi-Fi Status: $wifiStatus'),
+                        if (isConnectingWifi)
+                          const CircularProgressIndicator()
+                        else
+                          ElevatedButton(
+                            onPressed: _connectToWifi,
+                            child: const Text('Connect to Wi-Fi'),
+                          ),
+                      ],
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: () => sendMessage("Hi"),
+                        child: const Text('Send Hi'),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

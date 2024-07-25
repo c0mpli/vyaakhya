@@ -17,27 +17,25 @@ BLEAdvertData scndata;
 
 bool notify = false;
 bool deviceConnected = false;
+bool readyReceived = false;
 
 char ssid[] = "IoT_Hotspot";
-char password[13]; // 12 characters + null terminator
-
-void generatePassword() {
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    srand(time(NULL));
-    for (int i = 0; i < 12; i++) {
-        password[i] = charset[rand() % (sizeof(charset) - 1)];
-    }
-    password[12] = '\0';
-}
+char pass[] = "password123";  // Password for the hotspot
+char bssidStr[18];
 
 void setupWiFiAP() {
-    generatePassword();
     Serial.println("Setting up WiFi Access Point...");
-    int result = WiFi.apbegin(ssid, password);
+    int result = WiFi.apbegin(ssid,pass);
     if (result == WL_CONNECTED) {
         Serial.println("Access Point setup successful.");
         Serial.print("AP IP address: ");
         Serial.println(WiFi.localIP());
+        uint8_t bssid[6];
+        WiFi.BSSID(bssid);
+        snprintf(bssidStr, sizeof(bssidStr), "%02X:%02X:%02X:%02X:%02X:%02X", 
+                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+        Serial.print("AP BSSID: ");
+        Serial.println(bssidStr);
     } else {
         Serial.println("Failed to set up Access Point.");
         while (true); // Stop execution
@@ -57,8 +55,14 @@ void writeCB(BLECharacteristic* chr, uint8_t connID) {
     Serial.print(" write by connection ");
     Serial.println(connID);
     if (chr->getDataLen() > 0) {
+        String receivedString = chr->readString();
         Serial.print("Received string: ");
-        Serial.println(chr->readString());
+        Serial.println(receivedString);
+        
+        if (receivedString == "ready") {
+            Serial.println("Ready message received");
+            readyReceived = true;
+        }
     }
 }
 
@@ -114,18 +118,26 @@ void setup() {
 
 void loop() {
     if (BLE.connected(0) && !deviceConnected) {
-        delay(2000);
         deviceConnected = true;
-        String wifiInfo = String(ssid) + "," + String(password);
-        Tx.writeString(wifiInfo);
-        Serial.println("Device connected. Sending WiFi credentials:");
-        Serial.println(wifiInfo);
+        Serial.println("Device connected. Waiting for ready message...");
+    } else if (!BLE.connected(0) && deviceConnected) {
+        deviceConnected = false;
+        readyReceived = false;
+        Serial.println("Device disconnected");
+    }
+
+    if (deviceConnected && readyReceived) {
+        String wifiInfo = String(ssid);
+        String bssidInfo = String(bssidStr);
+        String combinedInfo = wifiInfo + "|" + bssidInfo;
+
+        Tx.writeString(combinedInfo);
+        Serial.println("Sending WiFi credentials:");
+        Serial.println(combinedInfo);
         if (notify) {
             Tx.notify(0);
         }
-    } else if (!BLE.connected(0) && deviceConnected) {
-        deviceConnected = false;
-        Serial.println("Device disconnected");
+        readyReceived = false; // Reset flag after sending credentials
     }
 
     if (Serial.available()) {
