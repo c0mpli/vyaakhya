@@ -3,6 +3,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_iot/wifi_iot.dart';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(const MyApp());
@@ -59,13 +60,7 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   void startScan() {
-    setState(() {
-      scanResults.clear(); // Clear previous results
-      connectedDevice = null; // Reset connected device
-      ssid = null; // Reset SSID
-      bssid = null;
-      wifiStatus = ''; // Reset Wi-Fi status
-    });
+    resetData();
 
     FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
     FlutterBluePlus.scanResults.listen((results) {
@@ -174,6 +169,27 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
+  void getImage() async {
+    print('Getting image from device');
+    try {
+      final response = await http.get(Uri.parse('http://192.168.1.1:80'));
+      print('Response status: ${response.statusCode}');
+      print('Response headers: ${response.headers}');
+      print('Response body length: ${response.bodyBytes.length}');
+      if (response.statusCode == 200) {
+        // Use the body of the response as image data
+        List<int> imageData = response.bodyBytes;
+        print('Image data: $imageData');
+        // Now you can display this image data
+        // For example: Image.memory(imageData)
+      } else {
+        print('Failed to load image: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error: $e');
+    }
+  }
+
   void _handleReceivedValue(List<int> value) {
     print("Received value: $value");
     String receivedString = utf8.decode(value);
@@ -226,16 +242,20 @@ class _BleScreenState extends State<BleScreen> {
             wifiStatus = 'Connected to $ssid';
             connectionProgress = 100;
           });
+          sendMessage("connected");
+          getImage();
         } else {
           setState(() {
             wifiStatus = 'Connection verified failed.';
             connectionProgress = 75;
+            isLoading = false;
           });
         }
       } else {
         setState(() {
           wifiStatus = 'Failed to connect to $ssid';
           connectionProgress = 75;
+          isLoading = false;
         });
       }
     } catch (e) {
@@ -243,6 +263,7 @@ class _BleScreenState extends State<BleScreen> {
       setState(() {
         wifiStatus = 'Error connecting to Wi-Fi: $e';
         connectionProgress = 75; // Reset to 50% if there's an error
+        isLoading = false;
       });
     } finally {
       setState(() {
@@ -276,7 +297,19 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  @override
+  void resetData() {
+    setState(() {
+      scanResults.clear();
+      connectedDevice = null;
+      targetCharacteristic = null;
+      ssid = null;
+      bssid = null;
+      wifiStatus = '';
+      isLoading = false;
+      connectionProgress = 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
