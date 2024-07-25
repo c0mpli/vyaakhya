@@ -34,6 +34,8 @@ class _BleScreenState extends State<BleScreen> {
   String? bssid;
   bool isConnectingWifi = false;
   String wifiStatus = '';
+  bool isLoading = false;
+  int connectionProgress = 0;
 
   @override
   void initState() {
@@ -78,6 +80,9 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   void connectToDevice(BluetoothDevice device) async {
+    setState(() {
+      isLoading = true;
+    });
     int attempts = 0;
 
     Future<BluetoothConnectionState> getCurrentConnectionState(
@@ -93,6 +98,7 @@ class _BleScreenState extends State<BleScreen> {
         if (connectionState == BluetoothConnectionState.connected) {
           setState(() {
             connectedDevice = device;
+            connectionProgress = 50;
           });
           await discoverServices(device);
           //sendMessage("ready"); // Add this line
@@ -103,6 +109,7 @@ class _BleScreenState extends State<BleScreen> {
         await device.connect();
         setState(() {
           connectedDevice = device;
+          connectionProgress = 50;
         });
         await discoverServices(device);
         break;
@@ -115,6 +122,10 @@ class _BleScreenState extends State<BleScreen> {
 
     if (attempts == 3) {
       print("Failed to connect after 3 attempts");
+      setState(() {
+        isLoading = false;
+        connectionProgress = 0;
+      });
     }
   }
 
@@ -148,6 +159,9 @@ class _BleScreenState extends State<BleScreen> {
                 sendMessage("ready");
                 characteristic.onValueReceived.listen((value) {
                   print("Received value: $value");
+                  setState(() {
+                    connectionProgress = 75;
+                  });
                   _handleReceivedValue(value);
                 });
               }
@@ -210,25 +224,30 @@ class _BleScreenState extends State<BleScreen> {
         if (success) {
           setState(() {
             wifiStatus = 'Connected to $ssid';
+            connectionProgress = 100;
           });
         } else {
           setState(() {
             wifiStatus = 'Connection verified failed.';
+            connectionProgress = 75;
           });
         }
       } else {
         setState(() {
           wifiStatus = 'Failed to connect to $ssid';
+          connectionProgress = 75;
         });
       }
     } catch (e) {
       print("Detailed error: $e");
       setState(() {
         wifiStatus = 'Error connecting to Wi-Fi: $e';
+        connectionProgress = 75; // Reset to 50% if there's an error
       });
     } finally {
       setState(() {
         isConnectingWifi = false;
+        isLoading = false;
       });
     }
   }
@@ -264,55 +283,63 @@ class _BleScreenState extends State<BleScreen> {
       appBar: AppBar(
         title: const Text('BLE Demo'),
       ),
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: startScan,
-            child: const Text('Refresh'),
-          ),
-          Expanded(
-            child: connectedDevice == null
-                ? ListView.builder(
-                    itemCount: scanResults.length,
-                    itemBuilder: (context, index) {
-                      ScanResult result = scanResults[index];
-                      return ListTile(
-                        title: Text(result.device.platformName.isEmpty
-                            ? "Unnamed"
-                            : result.device.platformName),
-                        subtitle: Text(result.device.remoteId.toString()),
-                        onTap: () => connectToDevice(result.device),
-                      );
-                    },
-                  )
-                : Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Text('Connected to ${connectedDevice!.platformName}'),
-                      const SizedBox(height: 20),
-                      if (ssid != null) ...[
-                        Text('Hotspot SSID: $ssid'),
-                        const SizedBox(height: 20),
-                        Text('Wi-Fi Status: $wifiStatus'),
-                        if (isConnectingWifi)
-                          const CircularProgressIndicator()
-                        else
-                          ElevatedButton(
-                            onPressed: _connectToWifi,
-                            child: const Text('Connect to Wi-Fi'),
-                          ),
-                      ],
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: () => sendMessage("Hi"),
-                        child: const Text('Send Hi'),
-                      ),
-                    ],
+      body: isLoading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 50),
+                    child: LinearProgressIndicator(
+                      value: connectionProgress / 100,
+                      minHeight: 10,
+                      backgroundColor: Colors.grey[300],
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.blue),
+                    ),
                   ),
-          ),
-        ],
-      ),
+                  const SizedBox(height: 20),
+                  const Text('Connecting...'),
+                ],
+              ),
+            )
+          : Column(
+              children: [
+                ElevatedButton(
+                  onPressed: startScan,
+                  child: const Text('Refresh'),
+                ),
+                Expanded(
+                  child: connectedDevice == null
+                      ? ListView.builder(
+                          itemCount: scanResults.length,
+                          itemBuilder: (context, index) {
+                            ScanResult result = scanResults[index];
+                            return ListTile(
+                              title: Text(result.device.platformName.isEmpty
+                                  ? "Unnamed"
+                                  : result.device.platformName),
+                              subtitle: Text(result.device.remoteId.toString()),
+                              onTap: () => connectToDevice(result.device),
+                            );
+                          },
+                        )
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                                'Connected to ${connectedDevice!.platformName}'),
+                            const SizedBox(height: 20),
+                            ElevatedButton(
+                              onPressed: () => sendMessage("Hi"),
+                              child: const Text('Send Hi'),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
     );
   }
 }
