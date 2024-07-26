@@ -254,52 +254,52 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  Future<void> getImage() async {
-    print('Getting image from device');
-    try {
-      //sendMessage("imageready");
-      //_connectToWifi();
+  // Future<void> getImage() async {
+  //   print('Getting image from device');
+  //   try {
+  //     //sendMessage("imageready");
+  //     //_connectToWifi();
 
-      final response =
-          await http.get(Uri.parse('http://192.168.1.1/image')).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          throw TimeoutException(
-              'The connection has timed out, please try again!');
-        },
-      );
+  //     final response =
+  //         await http.get(Uri.parse('http://192.168.1.1/image')).timeout(
+  //       const Duration(seconds: 30),
+  //       onTimeout: () {
+  //         throw TimeoutException(
+  //             'The connection has timed out, please try again!');
+  //       },
+  //     );
 
-      print('Response status: ${response.statusCode}');
-      print('Response headers: ${response.headers}');
-      print('Response body length: ${response.bodyBytes.length}');
-      if (response.statusCode == 200) {
-        setState(() {
-          _receivedImage = Uint8List.fromList(response.bodyBytes);
-        });
-        print('Image received successfully');
-      } else {
-        print('Failed to load image: ${response.statusCode}');
-        setState(() {
-          wifiStatus = 'Failed to load image: ${response.statusCode}';
-        });
-      }
-    } on SocketException catch (e) {
-      print('Socket Error: $e');
-      setState(() {
-        wifiStatus = 'Network Error: Unable to connect to the device';
-      });
-    } on TimeoutException catch (e) {
-      print('Timeout Error: $e');
-      setState(() {
-        wifiStatus = 'Connection timed out. Please try again.';
-      });
-    } catch (e) {
-      print('Error: $e');
-      setState(() {
-        wifiStatus = 'An error occurred: $e';
-      });
-    }
-  }
+  //     print('Response status: ${response.statusCode}');
+  //     print('Response headers: ${response.headers}');
+  //     print('Response body length: ${response.bodyBytes.length}');
+  //     if (response.statusCode == 200) {
+  //       setState(() {
+  //         _receivedImage = Uint8List.fromList(response.bodyBytes);
+  //       });
+  //       print('Image received successfully');
+  //     } else {
+  //       print('Failed to load image: ${response.statusCode}');
+  //       setState(() {
+  //         wifiStatus = 'Failed to load image: ${response.statusCode}';
+  //       });
+  //     }
+  //   } on SocketException catch (e) {
+  //     print('Socket Error: $e');
+  //     setState(() {
+  //       wifiStatus = 'Network Error: Unable to connect to the device';
+  //     });
+  //   } on TimeoutException catch (e) {
+  //     print('Timeout Error: $e');
+  //     setState(() {
+  //       wifiStatus = 'Connection timed out. Please try again.';
+  //     });
+  //   } catch (e) {
+  //     print('Error: $e');
+  //     setState(() {
+  //       wifiStatus = 'An error occurred: $e';
+  //     });
+  //   }
+  // }
 
   void handleReceivedValue(List<int> value) {
     print("Received value: $value");
@@ -437,6 +437,9 @@ class _BleScreenState extends State<BleScreen> {
       isLoading = false;
       connectionProgress = 0;
       _receivedImage = null;
+      imageChunks.clear();
+      totalPackets = 0;
+      receivedPackets = 0;
     });
   }
 
