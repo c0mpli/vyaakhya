@@ -3,11 +3,21 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_iot/wifi_iot.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
 import 'package:udp/udp.dart';
+
+import 'package:iotascamapp/api.dart';
+import 'package:iotascamapp/location.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
+import 'package:flutter_chat_types/flutter_chat_types.dart' as types;
+import 'package:flutter_chat_ui/flutter_chat_ui.dart';
+import 'dart:math';
+import 'package:just_audio/just_audio.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -35,19 +45,17 @@ class _BleScreenState extends State<BleScreen> {
   List<ScanResult> scanResults = [];
   BluetoothDevice? connectedDevice;
   BluetoothCharacteristic? targetCharacteristic;
-  String? ssid;
-  String? bssid;
-  bool isConnectingWifi = false;
+  String? ssid,
+      bssid,
+      imagePath,
+      localIp = "192.168.1.100",
+      wifiName = "NAVI Smart Glasses";
   String wifiStatus = '';
-  bool isLoading = false;
-  int connectionProgress = 0;
+  bool isLoading = false, isConnectingWifi = false;
   Uint8List? _receivedImage;
   UDP? udpReceiver;
   List<Uint8List> imageChunks = [];
-  int totalPackets = 0;
-  int receivedPackets = 0;
-  String? localIp = "192.168.1.100";
-  String? wifiName = "NAVI Smart Glasses";
+  int totalPackets = 0, receivedPackets = 0, connectionProgress = 0;
 
   @override
   void initState() {
@@ -75,7 +83,7 @@ class _BleScreenState extends State<BleScreen> {
     });
   }
 
-  void handleReceivedPacket(Uint8List data) {
+  void handleReceivedPacket(Uint8List data) async {
     print("Handling received packet of length: ${data.length}");
 
     if (data.length < 8) {
@@ -119,10 +127,17 @@ class _BleScreenState extends State<BleScreen> {
       // All packets received, combine them
       Uint8List fullImage =
           Uint8List.fromList(imageChunks.expand((x) => x).toList());
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/temp_image.jpg');
+      await file.writeAsBytes(fullImage);
+
       setState(() {
         _receivedImage = fullImage;
+        imagePath = file.path; // Store the path of the saved image
       });
-      print('Image received successfully');
+      print('Image received and saved successfully at: $imagePath');
+
+      _saveImage(context, this);
     }
   }
 
@@ -150,7 +165,7 @@ class _BleScreenState extends State<BleScreen> {
   void startScan() {
     resetData();
 
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
+    FlutterBluePlus.startScan(timeout: const Duration(seconds: 35));
     FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         scanResults = results
@@ -518,4 +533,353 @@ class _BleScreenState extends State<BleScreen> {
             ),
     );
   }
+}
+
+void _saveImage(BuildContext context, _BleScreenState state) async {
+  Position? userLocation;
+
+  customLoadingOverlay();
+  try {
+    userLocation = await determinePosition();
+  } catch (e) {
+    Get.back();
+    customSnackbar('Error',
+        'Failed to get user location\nEnsure that location is enabled & permissions are granted');
+    return;
+  }
+
+  String latitude = userLocation.latitude.toString();
+  String longitude = userLocation.longitude.toString();
+
+  final response =
+      await Api().uploadImage(state.imagePath!, latitude, longitude);
+  Get.back(closeOverlays: true);
+  if (response != {}) {
+    // onUploadSuccess(response['image_url'], response['description']);
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatPage(
+            description: response['description'], url: response['image_url']),
+      ),
+    );
+  } else {
+    customSnackbar('Error', 'Failed to upload image');
+  }
+}
+
+String randomString() {
+  final random = Random.secure();
+  final values = List<int>.generate(16, (i) => random.nextInt(255));
+  return base64UrlEncode(values);
+}
+
+class ChatPage extends StatefulWidget {
+  final String description;
+  final String url;
+
+  const ChatPage({
+    super.key,
+    required this.description,
+    required this.url,
+  });
+
+  @override
+  State<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends State<ChatPage> {
+  final List<types.Message> _messages = [];
+  final List<String> _backendMessages = [];
+  final RxBool isAnswerLoading = false.obs;
+
+  late AudioPlayer sendPlayer, recceivePlayer;
+  Duration? sendDuration, receiveDuration;
+
+  final _user = const types.User(id: 'user');
+
+  final TextEditingController mText = TextEditingController();
+  final RxBool isMicOn = false.obs;
+
+  @override
+  void initState() {
+    super.initState();
+    sendPlayer = AudioPlayer();
+    recceivePlayer = AudioPlayer();
+    _initializeAudioPlayer();
+  }
+
+  Future<void> _initializeAudioPlayer() async {
+    sendDuration = await sendPlayer.setAsset('assets/send_chime.mp3');
+    receiveDuration = await recceivePlayer.setAsset('assets/recieve_chime.mp3');
+  }
+
+  @override
+  void dispose() {
+    sendPlayer.dispose();
+    recceivePlayer.dispose();
+    mText.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    SpeechToText speech = SpeechToText();
+
+    return Stack(
+      children: [
+        Scaffold(
+          appBar: AppBar(
+            title: const Text('Chat'),
+          ),
+          body: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text(
+                'Description of image:',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 5),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: SizedBox(
+                  height: MediaQuery.of(context).size.width * 0.5,
+                  child: SingleChildScrollView(
+                    child: Text(
+                      widget.description,
+                      style: const TextStyle(fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Ask any question',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Chat(
+                  messages: _messages,
+                  onSendPressed: handleSendPressed,
+                  user: _user,
+                  customBottomWidget: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color.fromARGB(255, 37, 35, 46),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.grey.withOpacity(0.5),
+                            spreadRadius: 1,
+                            blurRadius: 5,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: mText,
+                              decoration: const InputDecoration(
+                                hintText: 'Type a message',
+                                hintStyle: TextStyle(color: Colors.white),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.all(0),
+                              ),
+                              style: const TextStyle(color: Colors.white),
+                              onSubmitted: (value) async {
+                                if (value.isNotEmpty) {
+                                  final String text = mText.text;
+                                  mText.clear();
+                                  await handleSendPressed(
+                                      types.PartialText(text: text));
+                                }
+                              },
+                            ),
+                          ),
+                          Obx(() {
+                            return IconButton(
+                              icon: Icon(
+                                Icons.mic,
+                                semanticLabel: 'Microphone',
+                                color:
+                                    isMicOn.value ? Colors.red : Colors.white,
+                              ),
+                              onPressed: () async {
+                                if (!isMicOn.value &&
+                                    await speech.initialize()) {
+                                  isMicOn.value = true;
+                                  await speech.listen(
+                                    onResult: (result) {
+                                      mText.text = result.recognizedWords;
+                                      isMicOn.value = false;
+                                    },
+                                  );
+                                } else {
+                                  isMicOn.value = false;
+                                  speech.stop();
+                                }
+                              },
+                            );
+                          }),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.send,
+                              semanticLabel: "Send",
+                              color: Colors.white,
+                            ),
+                            onPressed: () async {
+                              final String text = mText.text;
+                              if (text.isNotEmpty) {
+                                mText.clear();
+                                await handleSendPressed(
+                                    types.PartialText(text: text));
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Obx(() => isAnswerLoading.value
+            ? Container(
+                color: Colors.black.withOpacity(0.5),
+                child: const Center(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(width: 20),
+                      Text(
+                        'Loading answer',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          // background: Paint()..color = Colors.black,
+                        ),
+                      )
+                    ],
+                  ),
+                ),
+              )
+            : const SizedBox.shrink()),
+      ],
+    );
+  }
+
+  Future<void> handleSendPressed(types.PartialText message) async {
+    final textMessage = types.TextMessage(
+      author: _user,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      id: randomString(),
+      text: message.text,
+    );
+
+    final loadingMessage = types.TextMessage(
+      author: const types.User(id: 'bot'),
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      id: randomString(),
+      text: 'Loading...',
+    );
+
+    setState(() {
+      isAnswerLoading.value = true;
+      _messages.insert(0, textMessage);
+      _messages.insert(0, loadingMessage);
+      _backendMessages.add(message.text);
+    });
+
+    final response = await Api()
+        .getAnswer(message.text, widget.url, jsonEncode(_backendMessages));
+
+    if (response != '') {
+      final botMessage = types.TextMessage(
+        author: const types.User(id: 'bot'),
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+        id: randomString(),
+        text: response,
+        repliedMessage: textMessage,
+      );
+      setState(() {
+        isAnswerLoading.value = false;
+        _messages.removeAt(0);
+        _messages.insert(0, botMessage);
+      });
+    }
+  }
+}
+
+void customSnackbar(String title, String message) {
+  Get.snackbar(
+    title,
+    message,
+    snackPosition: SnackPosition.BOTTOM,
+    backgroundColor: Colors.red,
+    colorText: Colors.white,
+    padding: const EdgeInsets.all(16),
+  );
+}
+
+void customDialog(String title, String message) {
+  Get.defaultDialog(
+    title: title,
+    middleText: message,
+    backgroundColor: Colors.white,
+    titleStyle: const TextStyle(color: Colors.black),
+    middleTextStyle: const TextStyle(color: Colors.black),
+    confirm: ElevatedButton(
+      onPressed: () {
+        Get.back();
+        Get.back();
+      },
+      child: const Text('OK'),
+    ),
+  );
+}
+
+void customLoadingOverlay() {
+  Get.dialog(
+    barrierDismissible: false,
+    barrierColor: Colors.black.withOpacity(0.5),
+    PopScope(
+      canPop: false,
+      child: Material(
+        color: Colors.black.withOpacity(0.5),
+        child: const Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(width: 20),
+              Text(
+                'Loading description',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  // background: Paint()..color = Colors.black,
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
