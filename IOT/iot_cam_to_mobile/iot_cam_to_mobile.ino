@@ -337,7 +337,7 @@ Serial.print(packetSize);
 Serial.println(" bytes");
         //Serial.printf("Sent packet %d/%d, size: %d bytes\n", i+1, totalPackets, packetSize);
         
-        delay(50);  // Small delay to prevent overwhelming the network
+        delay(20);  // Small delay to prevent overwhelming the network
     }
 }
 
@@ -445,6 +445,7 @@ void sendImageToFlutterAppViaUDP() {
 //     Serial.println("Image sent to Flutter app");
 // }
 
+
 void setup() {
     Serial.begin(115200);
     Serial.println("BLE Custom Service Example");
@@ -478,9 +479,13 @@ void setup() {
     BLE.init();
     BLE.configAdvert()->setAdvData(advdata);
     BLE.configAdvert()->setScanRspData(scndata);
+    BLE.configAdvert()->setMinInterval(100);
+    BLE.configAdvert()->setMaxInterval(200);
+    BLE.configAdvert()->updateAdvertParams();
+
     BLE.configServer(1);
     BLE.addService(CustomService);
-
+  
     // Start advertising
     BLE.beginPeripheral();
     Serial.println("Advertising started");
