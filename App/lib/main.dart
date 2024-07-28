@@ -28,7 +28,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
+    return const GetMaterialApp(
       home: BleScreen(),
     );
   }
@@ -122,23 +122,36 @@ class _BleScreenState extends State<BleScreen> {
     });
 
     print("Received packets: $receivedPackets / $totalPackets");
-
-    if (receivedPackets == totalPackets) {
-      // All packets received, combine them
-      Uint8List fullImage =
-          Uint8List.fromList(imageChunks.expand((x) => x).toList());
-      final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/temp_image.jpg');
-      await file.writeAsBytes(fullImage);
-
-      setState(() {
-        _receivedImage = fullImage;
-        imagePath = file.path; // Store the path of the saved image
-      });
-      print('Image received and saved successfully at: $imagePath');
-
-      _saveImage(context, this);
+    // Check if Last packet received
+    if (packetIndex == totalPackets - 1) {
+      //check if all packets are received
+      if (receivedPackets == totalPackets) {
+        // All packets received, combine them
+        Get.back(); //ye loading description automatically kyu nai pakad raha??
+        Uint8List fullImage =
+            Uint8List.fromList(imageChunks.expand((x) => x).toList());
+        final tempDir = await getTemporaryDirectory();
+        final file = File('${tempDir.path}/temp_image.jpg');
+        await file.writeAsBytes(fullImage);
+        setState(() {
+          _receivedImage = fullImage;
+          imagePath = file.path; // Store the path of the saved image
+        });
+        print('Image received and saved successfully at: $imagePath');
+        _saveImage(context, file.path);
+      } else {
+        print("All packets not received");
+        Get.back();
+        customLoadingOverlay("Failed to get image");
+        Future.delayed(const Duration(seconds: 2), () {
+          Get.back();
+        });
+        //ye packets kabhi kabhi aate kabhi kabhi nai aisa kyu
+      }
     }
+    //if all the pakcets are received and they are not same as the total packets then we have Get.back() here
+
+    // if (receivedPackets == totalPackets) {
   }
 
   @override
@@ -181,6 +194,7 @@ class _BleScreenState extends State<BleScreen> {
     setState(() {
       isLoading = true;
     });
+    customLoadingOverlay("Connecting to NAVI Smart Glasses");
     int attempts = 0;
 
     Future<BluetoothConnectionState> getCurrentConnectionState(
@@ -222,6 +236,7 @@ class _BleScreenState extends State<BleScreen> {
         isLoading = false;
         connectionProgress = 0;
       });
+      Get.back();
     }
   }
 
@@ -364,6 +379,8 @@ class _BleScreenState extends State<BleScreen> {
             connectionProgress = 100;
             isLoading = false;
           });
+          Get.back();
+          customLoadingOverlay("Getting image from device");
           sendMessage("connected");
           await Future.delayed(const Duration(
               seconds: 1)); // Give some time for the Ameba to process
@@ -375,12 +392,15 @@ class _BleScreenState extends State<BleScreen> {
             wifiStatus = 'Failed to verify connection';
             connectionProgress = 75;
           });
+          Get.back();
+          //if else mei hai
         }
       } else {
         setState(() {
           wifiStatus = 'Failed to connect to $ssid';
           connectionProgress = 75;
         });
+        Get.back();
       }
     } catch (e) {
       print("Detailed error: $e");
@@ -388,6 +408,7 @@ class _BleScreenState extends State<BleScreen> {
         wifiStatus = 'Error connecting to Wi-Fi: $e';
         connectionProgress = 75;
       });
+      Get.back();
     } finally {
       setState(() {
         isConnectingWifi = false;
@@ -464,81 +485,84 @@ class _BleScreenState extends State<BleScreen> {
       appBar: AppBar(
         title: const Text('BLE Demo'),
       ),
-      body: isLoading
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 50),
-                    child: LinearProgressIndicator(
-                      value: connectionProgress / 100,
-                      minHeight: 10,
-                      backgroundColor: Colors.grey[300],
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.blue),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('Connecting...'),
-                ],
-              ),
-            )
-          : Column(
-              children: [
-                ElevatedButton(
-                  onPressed: startScan,
-                  child: const Text('Refresh'),
-                ),
-                Expanded(
-                  child: connectedDevice == null
-                      ? ListView.builder(
-                          itemCount: scanResults.length,
-                          itemBuilder: (context, index) {
-                            ScanResult result = scanResults[index];
-                            return ListTile(
-                              title: Text(result.device.platformName.isEmpty
-                                  ? "Unnamed"
-                                  : result.device.platformName),
-                              subtitle: Text(result.device.remoteId.toString()),
-                              onTap: () => connectToDevice(result.device),
-                            );
-                          },
-                        )
-                      : Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Text(
-                                'Connected to ${connectedDevice!.platformName}'),
-                            const SizedBox(height: 10),
-                            Text(wifiStatus),
-                            const SizedBox(height: 20),
-                            // ElevatedButton(
-                            //   onPressed: () => retryGetImage(3),
-                            //   child: const Text('Get Image'),
-                            // ),
-                            const SizedBox(height: 20),
-                            Text(
-                                'Received packets: $receivedPackets / $totalPackets'),
-                            if (_receivedImage != null)
-                              Image.memory(
-                                _receivedImage!,
-                                fit: BoxFit.cover,
-                              ),
-                          ],
+      body:
+          // ? Center(
+          //     child: Column(
+          //       mainAxisAlignment: MainAxisAlignment.center,
+          //       children: [
+          //         Padding(
+          //           padding: const EdgeInsets.symmetric(horizontal: 50),
+          //           child: LinearProgressIndicator(
+          //             semanticsValue: "Connected ${connectionProgress / 100}",
+          //             value: connectionProgress / 100,
+          //             minHeight: 10,
+          //             backgroundColor: Colors.grey[300],
+          //             valueColor:
+          //                 const AlwaysStoppedAnimation<Color>(Colors.blue),
+          //           ),
+          //         ),
+          //         const SizedBox(height: 20),
+          //         const Text('Connecting...'), //
+          //       ],
+          //     ),
+          //   )
+          // :
+          Column(
+        children: [
+          ElevatedButton(
+            onPressed: startScan,
+            child: const Text('Refresh'),
+          ),
+          Expanded(
+            child: connectedDevice == null
+                ? ListView.builder(
+                    itemCount: scanResults.length,
+                    itemBuilder: (context, index) {
+                      ScanResult result = scanResults[index];
+                      return ListTile(
+                        title: Text(result.device.platformName.isEmpty
+                            ? "Unnamed"
+                            : result.device.platformName),
+                        subtitle: Text(result.device.remoteId.toString()),
+                        onTap: () => connectToDevice(result.device),
+                      );
+                    },
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Text('Connected to ${connectedDevice!.platformName}'),
+                      const SizedBox(height: 10),
+                      Text(wifiStatus),
+                      const SizedBox(height: 20),
+                      // ElevatedButton(
+                      //   onPressed: () => retryGetImage(3),
+                      //   child: const Text('Get Image'),
+                      // ),
+                      const SizedBox(height: 20),
+                      Text(
+                          'Received packets: $receivedPackets / $totalPackets'),
+                      if (_receivedImage != null)
+                        Image.memory(
+                          _receivedImage!,
+                          fit: BoxFit.cover,
+                          semanticLabel:
+                              'Image clicked from NAVI Smart Glasses',
                         ),
-                ),
-              ],
-            ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-void _saveImage(BuildContext context, _BleScreenState state) async {
+void _saveImage(BuildContext context, String imagePath) async {
   Position? userLocation;
 
-  customLoadingOverlay();
+  customLoadingOverlay("Loading description");
   try {
     userLocation = await determinePosition();
   } catch (e) {
@@ -550,9 +574,8 @@ void _saveImage(BuildContext context, _BleScreenState state) async {
 
   String latitude = userLocation.latitude.toString();
   String longitude = userLocation.longitude.toString();
-
-  final response =
-      await Api().uploadImage(state.imagePath!, latitude, longitude);
+  print("Image path inside save image: $imagePath"); //ye log hi nai hua
+  final response = await Api().uploadImage(imagePath, latitude, longitude);
   Get.back(closeOverlays: true);
   if (response != {}) {
     // onUploadSuccess(response['image_url'], response['description']);
@@ -607,7 +630,8 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     sendPlayer = AudioPlayer();
     recceivePlayer = AudioPlayer();
-    _initializeAudioPlayer();
+    //_initializeAudioPlayer();
+    //loading screen dalna hai bas abhi
   }
 
   Future<void> _initializeAudioPlayer() async {
@@ -669,6 +693,7 @@ class _ChatPageState extends State<ChatPage> {
                   customBottomWidget: Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: Container(
+                      //ye talkback ka focus send pe tha fir bhi input khula
                       decoration: BoxDecoration(
                         color: const Color.fromARGB(255, 37, 35, 46),
                         boxShadow: [
@@ -683,69 +708,72 @@ class _ChatPageState extends State<ChatPage> {
                       ),
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: mText,
-                              decoration: const InputDecoration(
-                                hintText: 'Type a message',
-                                hintStyle: TextStyle(color: Colors.white),
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.all(0),
+                      child: Focus(
+                        autofocus: false,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: mText,
+                                decoration: const InputDecoration(
+                                  hintText: 'Type a message',
+                                  hintStyle: TextStyle(color: Colors.white),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.all(0),
+                                ),
+                                style: const TextStyle(color: Colors.white),
+                                onSubmitted: (value) async {
+                                  if (value.isNotEmpty) {
+                                    final String text = mText.text;
+                                    mText.clear();
+                                    await handleSendPressed(
+                                        types.PartialText(text: text));
+                                  }
+                                },
                               ),
-                              style: const TextStyle(color: Colors.white),
-                              onSubmitted: (value) async {
-                                if (value.isNotEmpty) {
-                                  final String text = mText.text;
+                            ),
+                            Obx(() {
+                              return IconButton(
+                                icon: Icon(
+                                  Icons.mic,
+                                  semanticLabel: 'Microphone',
+                                  color:
+                                      isMicOn.value ? Colors.red : Colors.white,
+                                ),
+                                onPressed: () async {
+                                  if (!isMicOn.value &&
+                                      await speech.initialize()) {
+                                    isMicOn.value = true;
+                                    await speech.listen(
+                                      onResult: (result) {
+                                        mText.text = result.recognizedWords;
+                                        isMicOn.value = false;
+                                      },
+                                    );
+                                  } else {
+                                    isMicOn.value = false;
+                                    speech.stop();
+                                  }
+                                },
+                              );
+                            }),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.send,
+                                semanticLabel: "Send",
+                                color: Colors.white,
+                              ),
+                              onPressed: () async {
+                                final String text = mText.text;
+                                if (text.isNotEmpty) {
                                   mText.clear();
                                   await handleSendPressed(
                                       types.PartialText(text: text));
                                 }
                               },
                             ),
-                          ),
-                          Obx(() {
-                            return IconButton(
-                              icon: Icon(
-                                Icons.mic,
-                                semanticLabel: 'Microphone',
-                                color:
-                                    isMicOn.value ? Colors.red : Colors.white,
-                              ),
-                              onPressed: () async {
-                                if (!isMicOn.value &&
-                                    await speech.initialize()) {
-                                  isMicOn.value = true;
-                                  await speech.listen(
-                                    onResult: (result) {
-                                      mText.text = result.recognizedWords;
-                                      isMicOn.value = false;
-                                    },
-                                  );
-                                } else {
-                                  isMicOn.value = false;
-                                  speech.stop();
-                                }
-                              },
-                            );
-                          }),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.send,
-                              semanticLabel: "Send",
-                              color: Colors.white,
-                            ),
-                            onPressed: () async {
-                              final String text = mText.text;
-                              if (text.isNotEmpty) {
-                                mText.clear();
-                                await handleSendPressed(
-                                    types.PartialText(text: text));
-                              }
-                            },
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -754,30 +782,36 @@ class _ChatPageState extends State<ChatPage> {
             ],
           ),
         ),
-        Obx(() => isAnswerLoading.value
-            ? Container(
-                color: Colors.black.withOpacity(0.5),
-                child: const Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(width: 20),
-                      Text(
-                        'Loading answer',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          // background: Paint()..color = Colors.black,
-                        ),
-                      )
-                    ],
-                  ),
-                ),
-              )
-            : const SizedBox.shrink()),
+        // Obx(() => isAnswerLoading.value
+        //     ? PopScope(
+        //         canPop: false,
+        //         child: Material(
+        //           color: Colors.black.withOpacity(0.5),
+        //           child: Container(
+        //             color: Colors.black.withOpacity(0.5),
+        //             child: const Center(
+        //               child: Row(
+        //                 mainAxisAlignment: MainAxisAlignment.center,
+        //                 crossAxisAlignment: CrossAxisAlignment.center,
+        //                 children: [
+        //                   CircularProgressIndicator(),
+        //                   SizedBox(width: 20),
+        //                   Text(
+        //                     'Loading answer',
+        //                     style: TextStyle(
+        //                       fontSize: 16,
+        //                       fontWeight: FontWeight.bold,
+        //                       color: Colors.white,
+        //                       // background: Paint()..color = Colors.black,
+        //                     ),
+        //                   )
+        //                 ],
+        //               ),
+        //             ),
+        //           ),
+        //         ),
+        //       )
+        //     : const SizedBox.shrink()),
       ],
     );
   }
@@ -804,9 +838,12 @@ class _ChatPageState extends State<ChatPage> {
       _backendMessages.add(message.text);
     });
 
+    customLoadingOverlay("Loading answer");
+
     final response = await Api()
         .getAnswer(message.text, widget.url, jsonEncode(_backendMessages));
 
+    Get.back();
     if (response != '') {
       final botMessage = types.TextMessage(
         author: const types.User(id: 'bot'),
@@ -820,6 +857,8 @@ class _ChatPageState extends State<ChatPage> {
         _messages.removeAt(0);
         _messages.insert(0, botMessage);
       });
+      //hide keyboard
+      FocusManager.instance.primaryFocus?.unfocus();
     }
   }
 }
@@ -852,7 +891,7 @@ void customDialog(String title, String message) {
   );
 }
 
-void customLoadingOverlay() {
+void customLoadingOverlay(String title) {
   Get.dialog(
     barrierDismissible: false,
     barrierColor: Colors.black.withOpacity(0.5),
@@ -860,20 +899,23 @@ void customLoadingOverlay() {
       canPop: false,
       child: Material(
         color: Colors.black.withOpacity(0.5),
-        child: const Center(
+        child: Center(
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(width: 20),
-              Text(
-                'Loading description',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  // background: Paint()..color = Colors.black,
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Focus(
+                autofocus: true,
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    // background: Paint()..color = Colors.black,
+                  ),
                 ),
               )
             ],
