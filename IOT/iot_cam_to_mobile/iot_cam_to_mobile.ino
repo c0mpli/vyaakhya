@@ -337,7 +337,7 @@ Serial.print(packetSize);
 Serial.println(" bytes");
         //Serial.printf("Sent packet %d/%d, size: %d bytes\n", i+1, totalPackets, packetSize);
         
-        delay(20);  // Small delay to prevent overwhelming the network
+        delay(30);  // Small delay to prevent overwhelming the network
     }
 }
 
