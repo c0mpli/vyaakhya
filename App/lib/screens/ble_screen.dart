@@ -14,6 +14,7 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
 import 'package:udp/udp.dart';
+import 'package:alfred/alfred.dart';
 
 class BleScreen extends StatefulWidget {
   const BleScreen({super.key});
@@ -37,12 +38,13 @@ class _BleScreenState extends State<BleScreen> {
   UDP? udpReceiver;
   List<Uint8List> imageChunks = [];
   int totalPackets = 0, receivedPackets = 0, connectionProgress = 0;
-
+  final Alfred server = Alfred();
   @override
   void initState() {
     super.initState();
     checkPermissions();
     setupUdpListener();
+    createAPI();
   }
 
   void setupUdpListener() async {
@@ -92,6 +94,7 @@ class _BleScreenState extends State<BleScreen> {
               description: response['description'], url: response['image_url']),
         ),
       );
+      server.close();
     } else {
       customSnackbar('Error', 'Failed to upload image');
     }
@@ -171,6 +174,7 @@ class _BleScreenState extends State<BleScreen> {
   @override
   void dispose() {
     udpReceiver?.close();
+    server.close();
     super.dispose();
   }
 
@@ -298,59 +302,12 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  // Future<void> getImage() async {
-  //   print('Getting image from device');
-  //   try {
-  //     //sendMessage("imageready");
-  //     //_connectToWifi();
-
-  //     final response =
-  //         await http.get(Uri.parse('http://192.168.1.1/image')).timeout(
-  //       const Duration(seconds: 30),
-  //       onTimeout: () {
-  //         throw TimeoutException(
-  //             'The connection has timed out, please try again!');
-  //       },
-  //     );
-
-  //     print('Response status: ${response.statusCode}');
-  //     print('Response headers: ${response.headers}');
-  //     print('Response body length: ${response.bodyBytes.length}');
-  //     if (response.statusCode == 200) {
-  //       setState(() {
-  //         _receivedImage = Uint8List.fromList(response.bodyBytes);
-  //       });
-  //       print('Image received successfully');
-  //     } else {
-  //       print('Failed to load image: ${response.statusCode}');
-  //       setState(() {
-  //         wifiStatus = 'Failed to load image: ${response.statusCode}';
-  //       });
-  //     }
-  //   } on SocketException catch (e) {
-  //     print('Socket Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'Network Error: Unable to connect to the device';
-  //     });
-  //   } on TimeoutException catch (e) {
-  //     print('Timeout Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'Connection timed out. Please try again.';
-  //     });
-  //   } catch (e) {
-  //     print('Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'An error occurred: $e';
-  //     });
-  //   }
-  // }
-
   void handleReceivedValue(List<int> value) {
-    print("Received value: $value");
+    // print("Received value: $value");
     String receivedString = utf8.decode(value);
     if (ssid == null) {
       List<String> split = receivedString.split('|');
-      print("Received split: $split");
+      // print("Received split: $split");
 
       setState(() {
         ssid = split[0];
@@ -431,26 +388,28 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  // Future<void> retryGetImage(int maxRetries) async {
-  //   for (int i = 0; i < maxRetries; i++) {
-  //     try {
-  //       await getImage();
-  //       if (_receivedImage != null) {
-  //         break; // Successfully got the image, exit the loop
-  //       }
-  //     } catch (e) {
-  //       print('Attempt ${i + 1} failed: $e');
-  //       if (i == maxRetries - 1) {
-  //         setState(() {
-  //           wifiStatus = 'Failed to get image after $maxRetries attempts';
-  //         });
-  //       } else {
-  //         await Future.delayed(
-  //             const Duration(seconds: 2)); // Wait before retrying
-  //       }
-  //     }
-  //   }
-  // }
+  Rx<Uint8List?> nwImage = Rx<Uint8List?>(null);
+
+  Future<void> createAPI() async {
+    server.post('/upload', (req, res) async {
+      final body = await req.bodyAsJsonMap;
+      final uploadedFile = (body['file'] as HttpBodyFileUpload);
+      var fileBytes = (uploadedFile.content as List<int>);
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/temp_image.jpg');
+      await file.writeAsBytes(fileBytes);
+      if (fileBytes.isNotEmpty) {
+        setState(() {
+          _receivedImage = Uint8List.fromList(fileBytes);
+        });
+      }
+      if (!mounted) return;
+      _saveImage(context, file.path);
+      res.send('Image received');
+    });
+
+    await server.listen();
+  }
 
   void sendMessage(String message) async {
     print('Sending message to device $message');
@@ -499,34 +458,21 @@ class _BleScreenState extends State<BleScreen> {
       appBar: AppBar(
         title: const Text('BLE Demo'),
       ),
-      body:
-          // ? Center(
-          //     child: Column(
-          //       mainAxisAlignment: MainAxisAlignment.center,
-          //       children: [
-          //         Padding(
-          //           padding: const EdgeInsets.symmetric(horizontal: 50),
-          //           child: LinearProgressIndicator(
-          //             semanticsValue: "Connected ${connectionProgress / 100}",
-          //             value: connectionProgress / 100,
-          //             minHeight: 10,
-          //             backgroundColor: Colors.grey[300],
-          //             valueColor:
-          //                 const AlwaysStoppedAnimation<Color>(Colors.blue),
-          //           ),
-          //         ),
-          //         const SizedBox(height: 20),
-          //         const Text('Connecting...'), //
-          //       ],
-          //     ),
-          //   )
-          // :
-          Column(
+      body: Column(
         children: [
           ElevatedButton(
             onPressed: startScan,
             child: const Text('Refresh'),
           ),
+          // if (_receivedImage != null && _receivedImage!.isNotEmpty)
+          //   Image.memory(
+          //     _receivedImage!,
+          //     fit: BoxFit.cover,
+          //     semanticLabel: 'Image clicked from NAVI Smart Glasses',
+          //     key: ValueKey(DateTime.now().millisecondsSinceEpoch),
+          //   )
+          // else
+          //   const Text('No image received yet'),
           Expanded(
             child: connectedDevice == null
                 ? ListView.builder(
@@ -557,13 +503,14 @@ class _BleScreenState extends State<BleScreen> {
                       const SizedBox(height: 20),
                       Text(
                           'Received packets: $receivedPackets / $totalPackets'),
-                      if (_receivedImage != null)
+                      if (_receivedImage != null && _receivedImage!.isNotEmpty)
                         Image.memory(
                           _receivedImage!,
                           fit: BoxFit.cover,
                           semanticLabel:
                               'Image clicked from NAVI Smart Glasses',
-                        ),
+                          key: ValueKey(DateTime.now().millisecondsSinceEpoch),
+                        )
                     ],
                   ),
           ),
