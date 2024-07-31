@@ -1,4 +1,3 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:geolocator/geolocator.dart';
@@ -15,7 +14,6 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
 import 'package:alfred/alfred.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 
 class BleScreen extends StatefulWidget {
   const BleScreen({super.key});
@@ -44,61 +42,104 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   Future<bool> enableRequiredServices() async {
-    final connectivity = Connectivity();
+    RxBool bluetoothEnabled =
+        (await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on)
+            .obs;
+    RxBool locationEnabled = (await Geolocator.isLocationServiceEnabled()).obs;
+    RxBool wifiEnabled = (await WiFiForIoTPlugin.isEnabled()).obs;
 
-    List<ConnectivityResult> connectivityResults =
-        await connectivity.checkConnectivity();
-    bool wifiEnabled = connectivityResults.contains(ConnectivityResult.wifi);
-    bool bluetoothEnabled =
-        await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
-    bool locationEnabled = await Geolocator.isLocationServiceEnabled();
-    List<ConnectivityResult> connections =
-        await Connectivity().checkConnectivity(); // Check if connected to Wi-Fi
-    if (!wifiEnabled || !bluetoothEnabled || !locationEnabled) {
+    if (!wifiEnabled.value ||
+        !bluetoothEnabled.value ||
+        !locationEnabled.value) {
       await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('Enable Services'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Please enable the following services:'),
-                if (!wifiEnabled) const Text('• WiFi'),
-                if (!bluetoothEnabled) const Text('• Bluetooth'),
-                if (!locationEnabled) const Text('• Location'),
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('Enable Services'),
+              content: Obx(() {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Please enable the following services:'),
+                    if (!wifiEnabled.value) const Text('• WiFi'),
+                    if (!bluetoothEnabled.value) const Text('• Bluetooth'),
+                    if (!locationEnabled.value) const Text('• Location'),
+                  ],
+                );
+              }),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Ok'),
+                  onPressed: () async {
+                    // if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
+                    // if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
+                    // if (!locationEnabled) {
+                    //   // For location, we still need to open settings as there's no direct API to enable it
+                    //   await Geolocator.openLocationSettings();
+                    // }
+                    wifiEnabled.value = await WiFiForIoTPlugin.isEnabled();
+                    bluetoothEnabled.value =
+                        await FlutterBluePlus.adapterState.first ==
+                            BluetoothAdapterState.on;
+                    locationEnabled.value =
+                        await Geolocator.isLocationServiceEnabled();
+                    // Navigator.of(context).pop();
+                    if (!mounted) {
+                      return;
+                    }
+                    setState(() {});
+                    if (wifiEnabled.value &&
+                        bluetoothEnabled.value &&
+                        locationEnabled.value) {
+                      Navigator.of(context).pop();
+                    } else {
+                      String whatNotEnabled = '';
+                      // based on which service is not enabled, show the respective message
+                      if (!wifiEnabled.value) {
+                        whatNotEnabled = 'WiFi';
+                      }
+                      if (!bluetoothEnabled.value) {
+                        // whatNotEnabled = 'Bluetooth';
+                        // if string is empty, then it means that wifi is not enabled
+                        if (whatNotEnabled.isEmpty) {
+                          whatNotEnabled = 'Bluetooth';
+                        } else {
+                          whatNotEnabled += ', Bluetooth';
+                        }
+                      }
+                      if (!locationEnabled.value) {
+                        // whatNotEnabled = 'Location';
+                        if (whatNotEnabled.isEmpty) {
+                          whatNotEnabled = 'Location';
+                        } else {
+                          whatNotEnabled += ' & Location';
+                        }
+                      }
+                      customSnackbar(
+                          'Error',
+                          // whihc service is not enabled
+                          '$whatNotEnabled is not enabled');
+                    }
+                  },
+                ),
               ],
             ),
-            actions: <Widget>[
-              TextButton(
-                child: const Text('Enable'),
-                onPressed: () async {
-                  if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
-                  if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
-                  if (!locationEnabled) {
-                    // For location, we still need to open settings as there's no direct API to enable it
-                    await Geolocator.openLocationSettings();
-                  }
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
           );
         },
       );
 
       // Check again after the user has (potentially) enabled the services
-      List<ConnectivityResult> connectivityResult =
-          await Connectivity().checkConnectivity();
-      wifiEnabled = connectivityResult.contains(ConnectivityResult.wifi);
-      bluetoothEnabled =
-          await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
-      locationEnabled = await Geolocator.isLocationServiceEnabled();
+      // wifiEnabled = connectivityResult.contains(ConnectivityResult.wifi);
+      // bluetoothEnabled =
+      //     await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
+      // locationEnabled = await Geolocator.isLocationServiceEnabled();
     }
 
-    return wifiEnabled && bluetoothEnabled && locationEnabled;
+    return true;
   }
 
   void _saveImage(BuildContext context, String imagePath) async {
@@ -149,51 +190,51 @@ class _BleScreenState extends State<BleScreen> {
       Permission.location,
     ].request();
 
-    // if (status.values.every((status) => status.isGranted)) {
-    //   bool servicesEnabled = await enableRequiredServices();
-    //   if (servicesEnabled) {
-    //     startScan();
-    //   } else {
-    //     showDialog(
-    //       context: context,
-    //       builder: (BuildContext context) {
-    //         return AlertDialog(
-    //           title: const Text('Services Not Enabled'),
-    //           content: const Text(
-    //               'Some required services could not be enabled. The app may not function correctly.'),
-    //           actions: <Widget>[
-    //             TextButton(
-    //               child: const Text('OK'),
-    //               onPressed: () {
-    //                 Navigator.of(context).pop();
-    //               },
-    //             ),
-    //           ],
-    //         );
-    //       },
-    //     );
-    //   }
-    // } else {
-    //   showDialog(
-    //     context: context,
-    //     builder: (BuildContext context) {
-    //       return AlertDialog(
-    //         title: const Text('Permissions Required'),
-    //         content: const Text(
-    //             'Please grant all required permissions to use this feature.'),
-    //         actions: <Widget>[
-    //           TextButton(
-    //             child: const Text('OK'),
-    //             onPressed: () {
-    //               Navigator.of(context).pop();
-    //               checkPermissions(); // Retry after user interaction
-    //             },
-    //           ),
-    //         ],
-    //       );
-    //     },
-    //   );
-    // }
+    if (status.values.every((status) => status.isGranted)) {
+      bool servicesEnabled = await enableRequiredServices();
+      if (servicesEnabled) {
+        startScan();
+      } else {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Services Not Enabled'),
+              content: const Text(
+                  'Some required services could not be enabled. The app may not function correctly.'),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('OK'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
+    } else {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Permissions Required'),
+            content: const Text(
+                'Please grant all required permissions to use this feature.'),
+            actions: <Widget>[
+              TextButton(
+                child: const Text('OK'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  checkPermissions(); // Retry after user interaction
+                },
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   void startScan() {
