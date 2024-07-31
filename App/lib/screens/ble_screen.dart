@@ -41,9 +41,62 @@ class _BleScreenState extends State<BleScreen> {
     checkPermissions();
   }
 
+  Future<bool> enableRequiredServices() async {
+    bool wifiEnabled = false;
+    bool bluetoothEnabled =
+        await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
+    bool locationEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!wifiEnabled || !bluetoothEnabled || !locationEnabled) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Enable Services'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Please enable the following services:'),
+                if (!wifiEnabled) const Text('• WiFi'),
+                if (!bluetoothEnabled) const Text('• Bluetooth'),
+                if (!locationEnabled) const Text('• Location'),
+              ],
+            ),
+            // actions: <Widget>[
+            //   TextButton(
+            //     child: const Text('Enable'),
+            //     onPressed: () async {
+            //       if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
+            //       if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
+            //       if (!locationEnabled) {
+            //         // For location, we still need to open settings as there's no direct API to enable it
+            //         await Geolocator.openLocationSettings();
+            //       }
+            //       Navigator.of(context).pop();
+            //     },
+            //   ),
+            // ],
+          );
+        },
+      );
+
+      // Check again after the user has (potentially) enabled the services
+      connectivityResult = await connectivity.checkConnectivity();
+      wifiEnabled = connectivityResult == ConnectivityResult.wifi;
+      bluetoothEnabled =
+          await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
+      locationEnabled = await Geolocator.isLocationServiceEnabled();
+    }
+
+    return wifiEnabled && bluetoothEnabled && locationEnabled;
+  }
+
   void _saveImage(BuildContext context, String imagePath) async {
     Position? userLocation;
     Get.back();
+    await WiFiForIoTPlugin.setEnabled(false);
     customLoadingOverlay("Loading description");
     try {
       userLocation = await determinePosition();
@@ -60,7 +113,6 @@ class _BleScreenState extends State<BleScreen> {
     final response = await Api().uploadImage(imagePath, latitude, longitude);
     Get.back(closeOverlays: true);
     if (response != {}) {
-      // onUploadSuccess(response['image_url'], response['description']);
       if (!context.mounted) return;
       Navigator.push(
         context,
@@ -90,9 +142,49 @@ class _BleScreenState extends State<BleScreen> {
     ].request();
 
     if (status.values.every((status) => status.isGranted)) {
-      startScan();
+      bool servicesEnabled = await enableRequiredServices();
+      if (servicesEnabled) {
+        startScan();
+      } else {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Services Not Enabled'),
+              content: const Text(
+                  'Some required services could not be enabled. The app may not function correctly.'),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('OK'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
     } else {
-      print("Permissions not granted");
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Permissions Required'),
+            content: const Text(
+                'Please grant all required permissions to use this feature.'),
+            actions: <Widget>[
+              TextButton(
+                child: const Text('OK'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  checkPermissions(); // Retry after user interaction
+                },
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 
@@ -362,18 +454,9 @@ class _BleScreenState extends State<BleScreen> {
       body: Column(
         children: [
           ElevatedButton(
-            onPressed: startScan,
+            onPressed: () => {checkPermissions(), startScan()},
             child: const Text('Refresh'),
           ),
-          // if (_receivedImage != null && _receivedImage!.isNotEmpty)
-          //   Image.memory(
-          //     _receivedImage!,
-          //     fit: BoxFit.cover,
-          //     semanticLabel: 'Image clicked from NAVI Smart Glasses',
-          //     key: ValueKey(DateTime.now().millisecondsSinceEpoch),
-          //   )
-          // else
-          //   const Text('No image received yet'),
           Expanded(
             child: connectedDevice == null
                 ? ListView.builder(
@@ -397,12 +480,7 @@ class _BleScreenState extends State<BleScreen> {
                       const SizedBox(height: 10),
                       Text(wifiStatus),
                       const SizedBox(height: 20),
-                      // ElevatedButton(
-                      //   onPressed: () => retryGetImage(3),
-                      //   child: const Text('Get Image'),
-                      // ),
                       const SizedBox(height: 20),
-
                       if (_receivedImage != null && _receivedImage!.isNotEmpty)
                         Image.memory(
                           _receivedImage!,
