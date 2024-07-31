@@ -15,6 +15,7 @@ import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
 import 'package:alfred/alfred.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class BleScreen extends StatefulWidget {
   const BleScreen({super.key});
@@ -43,13 +44,16 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   Future<bool> enableRequiredServices() async {
-    // bool wifiEnabled = false;
+    final connectivity = Connectivity();
+
+    List<ConnectivityResult> connectivityResults =
+        await connectivity.checkConnectivity();
+    bool wifiEnabled = connectivityResults.contains(ConnectivityResult.wifi);
     bool bluetoothEnabled =
         await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
     bool locationEnabled = await Geolocator.isLocationServiceEnabled();
     List<ConnectivityResult> connections =
         await Connectivity().checkConnectivity(); // Check if connected to Wi-Fi
-    bool wifiEnabled = connections.contains(ConnectivityResult.wifi);
     if (!wifiEnabled || !bluetoothEnabled || !locationEnabled) {
       await showDialog(
         context: context,
@@ -67,20 +71,20 @@ class _BleScreenState extends State<BleScreen> {
                 if (!locationEnabled) const Text('• Location'),
               ],
             ),
-            // actions: <Widget>[
-            //   TextButton(
-            //     child: const Text('Enable'),
-            //     onPressed: () async {
-            //       if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
-            //       if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
-            //       if (!locationEnabled) {
-            //         // For location, we still need to open settings as there's no direct API to enable it
-            //         await Geolocator.openLocationSettings();
-            //       }
-            //       Navigator.of(context).pop();
-            //     },
-            //   ),
-            // ],
+            actions: <Widget>[
+              TextButton(
+                child: const Text('Enable'),
+                onPressed: () async {
+                  if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
+                  if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
+                  if (!locationEnabled) {
+                    // For location, we still need to open settings as there's no direct API to enable it
+                    await Geolocator.openLocationSettings();
+                  }
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
           );
         },
       );
@@ -145,51 +149,51 @@ class _BleScreenState extends State<BleScreen> {
       Permission.location,
     ].request();
 
-    if (status.values.every((status) => status.isGranted)) {
-      bool servicesEnabled = await enableRequiredServices();
-      if (servicesEnabled) {
-        startScan();
-      } else {
-        showDialog(
-          context: context,
-          builder: (BuildContext context) {
-            return AlertDialog(
-              title: const Text('Services Not Enabled'),
-              content: const Text(
-                  'Some required services could not be enabled. The app may not function correctly.'),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('OK'),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      }
-    } else {
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('Permissions Required'),
-            content: const Text(
-                'Please grant all required permissions to use this feature.'),
-            actions: <Widget>[
-              TextButton(
-                child: const Text('OK'),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  checkPermissions(); // Retry after user interaction
-                },
-              ),
-            ],
-          );
-        },
-      );
-    }
+    // if (status.values.every((status) => status.isGranted)) {
+    //   bool servicesEnabled = await enableRequiredServices();
+    //   if (servicesEnabled) {
+    //     startScan();
+    //   } else {
+    //     showDialog(
+    //       context: context,
+    //       builder: (BuildContext context) {
+    //         return AlertDialog(
+    //           title: const Text('Services Not Enabled'),
+    //           content: const Text(
+    //               'Some required services could not be enabled. The app may not function correctly.'),
+    //           actions: <Widget>[
+    //             TextButton(
+    //               child: const Text('OK'),
+    //               onPressed: () {
+    //                 Navigator.of(context).pop();
+    //               },
+    //             ),
+    //           ],
+    //         );
+    //       },
+    //     );
+    //   }
+    // } else {
+    //   showDialog(
+    //     context: context,
+    //     builder: (BuildContext context) {
+    //       return AlertDialog(
+    //         title: const Text('Permissions Required'),
+    //         content: const Text(
+    //             'Please grant all required permissions to use this feature.'),
+    //         actions: <Widget>[
+    //           TextButton(
+    //             child: const Text('OK'),
+    //             onPressed: () {
+    //               Navigator.of(context).pop();
+    //               checkPermissions(); // Retry after user interaction
+    //             },
+    //           ),
+    //         ],
+    //       );
+    //     },
+    //   );
+    // }
   }
 
   void startScan() {
