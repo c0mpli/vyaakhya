@@ -13,7 +13,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
-import 'package:udp/udp.dart';
 import 'package:alfred/alfred.dart';
 
 class BleScreen extends StatefulWidget {
@@ -35,40 +34,16 @@ class _BleScreenState extends State<BleScreen> {
   String wifiStatus = '';
   bool isLoading = false, isConnectingWifi = false;
   Uint8List? _receivedImage;
-  UDP? udpReceiver;
-  List<Uint8List> imageChunks = [];
-  int totalPackets = 0, receivedPackets = 0, connectionProgress = 0;
   final Alfred server = Alfred();
   @override
   void initState() {
     super.initState();
     checkPermissions();
-    setupUdpListener();
-    createAPI();
-  }
-
-  void setupUdpListener() async {
-    udpReceiver = await UDP.bind(Endpoint.any(port: const Port(4210)));
-    print("UDP receiver bound to port 4210");
-
-    _startListening();
-  }
-
-  void _startListening() {
-    print("Starting to listen for UDP packets");
-
-    udpReceiver!.asStream().listen((Datagram? datagram) {
-      if (datagram != null) {
-        print("Received UDP packet from ${datagram.address}:${datagram.port}");
-
-        handleReceivedPacket(datagram.data);
-      }
-    });
   }
 
   void _saveImage(BuildContext context, String imagePath) async {
     Position? userLocation;
-
+    Get.back();
     customLoadingOverlay("Loading description");
     try {
       userLocation = await determinePosition();
@@ -100,80 +75,8 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  void handleReceivedPacket(Uint8List data) async {
-    print("Handling received packet of length: ${data.length}");
-
-    if (data.length < 8) {
-      print("Received packet is too short: ${data.length} bytes");
-      return;
-    }
-
-    int packetIndex = ByteData.view(data.buffer).getInt32(0, Endian.little);
-    int totalPackets = ByteData.view(data.buffer).getInt32(4, Endian.little);
-
-    print("Received packet $packetIndex of $totalPackets");
-
-    if (data.length <= 8) {
-      print("No image data in packet");
-      return;
-    }
-
-    Uint8List imageData = data.sublist(8);
-    print("Image data length: ${imageData.length}");
-    // First 4 bytes: packet index
-    // Next 4 bytes: total packets
-    // Rest: image data
-
-    if (packetIndex == 0) {
-      // First packet, reset the image chunks
-      imageChunks = List.filled(totalPackets, Uint8List(0));
-      this.totalPackets = totalPackets;
-      receivedPackets = 0;
-    }
-
-    imageChunks[packetIndex] = imageData;
-    receivedPackets++;
-
-    setState(() {
-      // Update the UI to show progress
-    });
-
-    print("Received packets: $receivedPackets / $totalPackets");
-    // Check if Last packet received
-    if (packetIndex == totalPackets - 1) {
-      //check if all packets are received
-      if (receivedPackets == totalPackets) {
-        // All packets received, combine them
-        Get.back(); //ye loading description automatically kyu nai pakad raha??
-        Uint8List fullImage =
-            Uint8List.fromList(imageChunks.expand((x) => x).toList());
-        final tempDir = await getTemporaryDirectory();
-        final file = File('${tempDir.path}/temp_image.jpg');
-        await file.writeAsBytes(fullImage);
-        setState(() {
-          _receivedImage = fullImage;
-          imagePath = file.path; // Store the path of the saved image
-        });
-        print('Image received and saved successfully at: $imagePath');
-        _saveImage(context, file.path);
-      } else {
-        print("All packets not received");
-        Get.back();
-        customLoadingOverlay("Failed to get image");
-        Future.delayed(const Duration(seconds: 2), () {
-          Get.back();
-        });
-        //ye packets kabhi kabhi aate kabhi kabhi nai aisa kyu
-      }
-    }
-    //if all the pakcets are received and they are not same as the total packets then we have Get.back() here
-
-    // if (receivedPackets == totalPackets) {
-  }
-
   @override
   void dispose() {
-    udpReceiver?.close();
     server.close();
     super.dispose();
   }
@@ -228,7 +131,6 @@ class _BleScreenState extends State<BleScreen> {
         if (connectionState == BluetoothConnectionState.connected) {
           setState(() {
             connectedDevice = device;
-            connectionProgress = 50;
           });
           await discoverServices(device);
           break;
@@ -237,7 +139,6 @@ class _BleScreenState extends State<BleScreen> {
         await device.connect();
         setState(() {
           connectedDevice = device;
-          connectionProgress = 50;
         });
         await discoverServices(device);
         break;
@@ -252,7 +153,6 @@ class _BleScreenState extends State<BleScreen> {
       print("Failed to connect after 3 attempts");
       setState(() {
         isLoading = false;
-        connectionProgress = 0;
       });
       Get.back();
     }
@@ -287,9 +187,7 @@ class _BleScreenState extends State<BleScreen> {
                 sendMessage("ready");
                 characteristic.onValueReceived.listen((value) {
                   print("Received value: $value");
-                  setState(() {
-                    connectionProgress = 75;
-                  });
+
                   handleReceivedValue(value);
                 });
               }
@@ -347,12 +245,15 @@ class _BleScreenState extends State<BleScreen> {
         if (isConnected) {
           setState(() {
             wifiStatus = 'Connected to $ssid';
-            connectionProgress = 100;
             isLoading = false;
           });
           Get.back();
           customLoadingOverlay("Getting image from device");
+          // String? wifiIP = await NetworkInfo().getWifiIP();
+          // print(wifiIP);
+          createAPI();
           sendMessage("connected");
+
           await Future.delayed(const Duration(
               seconds: 1)); // Give some time for the Ameba to process
           //getImage();
@@ -361,7 +262,6 @@ class _BleScreenState extends State<BleScreen> {
         } else {
           setState(() {
             wifiStatus = 'Failed to verify connection';
-            connectionProgress = 75;
           });
           Get.back();
           //if else mei hai
@@ -369,7 +269,6 @@ class _BleScreenState extends State<BleScreen> {
       } else {
         setState(() {
           wifiStatus = 'Failed to connect to $ssid';
-          connectionProgress = 75;
         });
         Get.back();
       }
@@ -377,7 +276,6 @@ class _BleScreenState extends State<BleScreen> {
       print("Detailed error: $e");
       setState(() {
         wifiStatus = 'Error connecting to Wi-Fi: $e';
-        connectionProgress = 75;
       });
       Get.back();
     } finally {
@@ -391,7 +289,13 @@ class _BleScreenState extends State<BleScreen> {
   Rx<Uint8List?> nwImage = Rx<Uint8List?>(null);
 
   Future<void> createAPI() async {
+    //print my ip
+
+    server.get('/', (req, res) {
+      res.send("Wello Horld");
+    });
     server.post('/upload', (req, res) async {
+      print('Received image upload request');
       final body = await req.bodyAsJsonMap;
       final uploadedFile = (body['file'] as HttpBodyFileUpload);
       var fileBytes = (uploadedFile.content as List<int>);
@@ -405,6 +309,7 @@ class _BleScreenState extends State<BleScreen> {
       }
       if (!mounted) return;
       _saveImage(context, file.path);
+      print('Image received');
       res.send('Image received');
     });
 
@@ -444,11 +349,7 @@ class _BleScreenState extends State<BleScreen> {
       bssid = null;
       wifiStatus = '';
       isLoading = false;
-      connectionProgress = 0;
       _receivedImage = null;
-      imageChunks.clear();
-      totalPackets = 0;
-      receivedPackets = 0;
     });
   }
 
@@ -501,8 +402,7 @@ class _BleScreenState extends State<BleScreen> {
                       //   child: const Text('Get Image'),
                       // ),
                       const SizedBox(height: 20),
-                      Text(
-                          'Received packets: $receivedPackets / $totalPackets'),
+
                       if (_receivedImage != null && _receivedImage!.isNotEmpty)
                         Image.memory(
                           _receivedImage!,

@@ -6,6 +6,8 @@
 #include "AmebaFatFS.h"
 #include "Base64.h"
 #include <WiFiUdp.h>
+#include "StreamIO.h"
+#include "Base64.h"
 
 #define UDP_PORT 4210
 #define MAX_PACKET_SIZE 1400  // Adjust based on your network's MTU
@@ -16,6 +18,7 @@
 #define CHANNEL 0
 #define FILENAME "image.jpg"
 #define STRING_BUF_SIZE 100
+#define API_ENDPOINT "http://192.168.1.1:3000/upload"
 
 
 BLEService CustomService(CUSTOM_SERVICE_UUID);
@@ -445,6 +448,88 @@ void sendImageToFlutterAppViaUDP() {
 //     Serial.println("Image sent to Flutter app");
 // }
 
+void sendImageToAPI(uint8_t* img_addr, uint32_t img_len) {
+    WiFiClient client;
+    
+    Serial.print("Connecting to API endpoint: ");
+    Serial.println(API_ENDPOINT);
+    
+    if (client.connect("192.168.1.100", 3000)) {  // Assuming the server is running on port 3000
+        Serial.println("Connected to server");
+        
+        // Prepare the HTTP POST request
+        String boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        String body = "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n";
+        body += "Content-Type: image/jpeg\r\n\r\n";
+        
+        String end = "\r\n--" + boundary + "--\r\n";
+        
+        int contentLength = body.length() + img_len + end.length();
+        
+        // Send the HTTP POST request headers
+        client.println("POST /upload HTTP/1.1");
+        client.println("Host: 192.168.1.100:3000");
+        client.println("Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW");
+        client.println("Content-Length: " + String(contentLength));
+        client.println("Connection: close");
+        client.println();
+//         POST /upload HTTP/1.1
+// Host: 192.168.1.1:3000
+// Content-Length: 241
+// Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+
+// ------WebKitFormBoundary7MA4YWxkTrZu0gW
+// Content-Disposition: form-data; name="file"; filename="postman-cloud:///1eeacc0e-4a04-40f0-b66e-7bc1da1265be"
+// Content-Type: <Content-Type header here>
+
+// (data)
+// ------WebKitFormBoundary7MA4YWxkTrZu0gW--
+        // Send the body
+        client.print(body);
+        
+        // Send the image data
+        client.write(img_addr, img_len);
+        
+        // Send the closing boundary
+        client.print(end);
+        
+        // Wait for the server's response
+        while (client.connected()) {
+            String line = client.readStringUntil('\n');
+            if (line == "\r") {
+                Serial.println("Headers received");
+                break;
+            }
+        }
+        
+        // Read the response
+        while (client.available()) {
+            String line = client.readStringUntil('\n');
+            Serial.println(line);
+        }
+        
+        client.stop();
+        Serial.println("Request completed");
+    } else {
+        Serial.println("Connection to server failed");
+    }
+}
+
+void captureAndSendImageToAPI() {
+    Serial.println("Capturing and sending image to API");
+    
+    Serial.println("Capturing image...");
+    Camera.getImage(CHANNEL, &img_addr, &img_len);
+    Serial.print("Image captured. Address: ");
+    Serial.print((unsigned long)img_addr, HEX);
+    Serial.print(", Length: ");
+    Serial.println(img_len);
+    
+    sendImageToAPI((uint8_t*)img_addr, img_len);
+    Serial.println("Image sending process completed");
+}
+
 
 void setup() {
     Serial.begin(115200);
@@ -497,7 +582,7 @@ void setup() {
     // wifiServer.begin();
     // Serial.println("HTTP server started");
 
-    udp.begin(UDP_PORT);
+    //udp.begin(UDP_PORT);
 }
 
 void loop() {
@@ -545,7 +630,8 @@ void loop() {
       Serial.println("Inside connected");
         IPAddress apIP = WiFi.localIP();
         Serial.print("AP IP address: ");
-        sendImageToFlutterAppViaUDP();
+        //sendImageToFlutterAppViaUDP();
+        captureAndSendImageToAPI();
 
         Serial.println(apIP);
         delay(3000);  // Wait 3 seconds        
