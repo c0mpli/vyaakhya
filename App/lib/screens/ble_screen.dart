@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:geolocator/geolocator.dart';
@@ -42,11 +43,13 @@ class _BleScreenState extends State<BleScreen> {
   }
 
   Future<bool> enableRequiredServices() async {
-    bool wifiEnabled = false;
+    // bool wifiEnabled = false;
     bool bluetoothEnabled =
         await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
     bool locationEnabled = await Geolocator.isLocationServiceEnabled();
-
+    List<ConnectivityResult> connections =
+        await Connectivity().checkConnectivity(); // Check if connected to Wi-Fi
+    bool wifiEnabled = connections.contains(ConnectivityResult.wifi);
     if (!wifiEnabled || !bluetoothEnabled || !locationEnabled) {
       await showDialog(
         context: context,
@@ -83,8 +86,9 @@ class _BleScreenState extends State<BleScreen> {
       );
 
       // Check again after the user has (potentially) enabled the services
-      connectivityResult = await connectivity.checkConnectivity();
-      wifiEnabled = connectivityResult == ConnectivityResult.wifi;
+      List<ConnectivityResult> connectivityResult =
+          await Connectivity().checkConnectivity();
+      wifiEnabled = connectivityResult.contains(ConnectivityResult.wifi);
       bluetoothEnabled =
           await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
       locationEnabled = await Geolocator.isLocationServiceEnabled();
