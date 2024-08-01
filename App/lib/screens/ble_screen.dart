@@ -13,7 +13,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
-import 'package:udp/udp.dart';
+import 'package:alfred/alfred.dart';
 
 class BleScreen extends StatefulWidget {
   const BleScreen({super.key});
@@ -34,39 +34,118 @@ class _BleScreenState extends State<BleScreen> {
   String wifiStatus = '';
   bool isLoading = false, isConnectingWifi = false;
   Uint8List? _receivedImage;
-  UDP? udpReceiver;
-  List<Uint8List> imageChunks = [];
-  int totalPackets = 0, receivedPackets = 0, connectionProgress = 0;
-
+  final Alfred server = Alfred();
   @override
   void initState() {
     super.initState();
     checkPermissions();
-    setupUdpListener();
   }
 
-  void setupUdpListener() async {
-    udpReceiver = await UDP.bind(Endpoint.any(port: const Port(4210)));
-    print("UDP receiver bound to port 4210");
+  Future<bool> enableRequiredServices() async {
+    RxBool bluetoothEnabled =
+        (await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on)
+            .obs;
+    RxBool locationEnabled = (await Geolocator.isLocationServiceEnabled()).obs;
+    RxBool wifiEnabled = (await WiFiForIoTPlugin.isEnabled()).obs;
 
-    _startListening();
-  }
+    if (!wifiEnabled.value ||
+        !bluetoothEnabled.value ||
+        !locationEnabled.value) {
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('Enable Services'),
+              content: Obx(() {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Please enable the following services:'),
+                    if (!wifiEnabled.value) const Text('• WiFi'),
+                    if (!bluetoothEnabled.value) const Text('• Bluetooth'),
+                    if (!locationEnabled.value) const Text('• Location'),
+                  ],
+                );
+              }),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Ok'),
+                  onPressed: () async {
+                    // if (!wifiEnabled) await WiFiForIoTPlugin.setEnabled(true);
+                    // if (!bluetoothEnabled) await FlutterBluePlus.turnOn();
+                    // if (!locationEnabled) {
+                    //   // For location, we still need to open settings as there's no direct API to enable it
+                    //   await Geolocator.openLocationSettings();
+                    // }
+                    wifiEnabled.value = await WiFiForIoTPlugin.isEnabled();
+                    bluetoothEnabled.value =
+                        await FlutterBluePlus.adapterState.first ==
+                            BluetoothAdapterState.on;
+                    locationEnabled.value =
+                        await Geolocator.isLocationServiceEnabled();
+                    // Navigator.of(context).pop();
+                    if (!mounted) {
+                      return;
+                    }
+                    setState(() {});
+                    if (wifiEnabled.value &&
+                        bluetoothEnabled.value &&
+                        locationEnabled.value) {
+                      Navigator.of(context).pop();
+                    } else {
+                      String whatNotEnabled = '';
+                      // based on which service is not enabled, show the respective message
+                      if (!wifiEnabled.value) {
+                        whatNotEnabled = 'WiFi';
+                      }
+                      if (!bluetoothEnabled.value) {
+                        // whatNotEnabled = 'Bluetooth';
+                        // if string is empty, then it means that wifi is not enabled
+                        if (whatNotEnabled.isEmpty) {
+                          whatNotEnabled = 'Bluetooth';
+                        } else {
+                          whatNotEnabled += ', Bluetooth';
+                        }
+                      }
+                      if (!locationEnabled.value) {
+                        // whatNotEnabled = 'Location';
+                        if (whatNotEnabled.isEmpty) {
+                          whatNotEnabled = 'Location';
+                        } else {
+                          whatNotEnabled += ' & Location';
+                        }
+                      }
+                      customSnackbar(
+                          'Error',
+                          // whihc service is not enabled
+                          '$whatNotEnabled is not enabled');
+                    }
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      );
 
-  void _startListening() {
-    print("Starting to listen for UDP packets");
+      // Check again after the user has (potentially) enabled the services
+      // wifiEnabled = connectivityResult.contains(ConnectivityResult.wifi);
+      // bluetoothEnabled =
+      //     await FlutterBluePlus.adapterState.first == BluetoothAdapterState.on;
+      // locationEnabled = await Geolocator.isLocationServiceEnabled();
+    }
 
-    udpReceiver!.asStream().listen((Datagram? datagram) {
-      if (datagram != null) {
-        print("Received UDP packet from ${datagram.address}:${datagram.port}");
-
-        handleReceivedPacket(datagram.data);
-      }
-    });
+    return true;
   }
 
   void _saveImage(BuildContext context, String imagePath) async {
     Position? userLocation;
-
+    Get.back();
+    await WiFiForIoTPlugin.setEnabled(false);
     customLoadingOverlay("Loading description");
     try {
       userLocation = await determinePosition();
@@ -83,7 +162,6 @@ class _BleScreenState extends State<BleScreen> {
     final response = await Api().uploadImage(imagePath, latitude, longitude);
     Get.back(closeOverlays: true);
     if (response != {}) {
-      // onUploadSuccess(response['image_url'], response['description']);
       if (!context.mounted) return;
       Navigator.push(
         context,
@@ -92,85 +170,15 @@ class _BleScreenState extends State<BleScreen> {
               description: response['description'], url: response['image_url']),
         ),
       );
+      server.close();
     } else {
       customSnackbar('Error', 'Failed to upload image');
     }
   }
 
-  void handleReceivedPacket(Uint8List data) async {
-    print("Handling received packet of length: ${data.length}");
-
-    if (data.length < 8) {
-      print("Received packet is too short: ${data.length} bytes");
-      return;
-    }
-
-    int packetIndex = ByteData.view(data.buffer).getInt32(0, Endian.little);
-    int totalPackets = ByteData.view(data.buffer).getInt32(4, Endian.little);
-
-    print("Received packet $packetIndex of $totalPackets");
-
-    if (data.length <= 8) {
-      print("No image data in packet");
-      return;
-    }
-
-    Uint8List imageData = data.sublist(8);
-    print("Image data length: ${imageData.length}");
-    // First 4 bytes: packet index
-    // Next 4 bytes: total packets
-    // Rest: image data
-
-    if (packetIndex == 0) {
-      // First packet, reset the image chunks
-      imageChunks = List.filled(totalPackets, Uint8List(0));
-      this.totalPackets = totalPackets;
-      receivedPackets = 0;
-    }
-
-    imageChunks[packetIndex] = imageData;
-    receivedPackets++;
-
-    setState(() {
-      // Update the UI to show progress
-    });
-
-    print("Received packets: $receivedPackets / $totalPackets");
-    // Check if Last packet received
-    if (packetIndex == totalPackets - 1) {
-      //check if all packets are received
-      if (receivedPackets == totalPackets) {
-        // All packets received, combine them
-        Get.back(); //ye loading description automatically kyu nai pakad raha??
-        Uint8List fullImage =
-            Uint8List.fromList(imageChunks.expand((x) => x).toList());
-        final tempDir = await getTemporaryDirectory();
-        final file = File('${tempDir.path}/temp_image.jpg');
-        await file.writeAsBytes(fullImage);
-        setState(() {
-          _receivedImage = fullImage;
-          imagePath = file.path; // Store the path of the saved image
-        });
-        print('Image received and saved successfully at: $imagePath');
-        _saveImage(context, file.path);
-      } else {
-        print("All packets not received");
-        Get.back();
-        customLoadingOverlay("Failed to get image");
-        Future.delayed(const Duration(seconds: 2), () {
-          Get.back();
-        });
-        //ye packets kabhi kabhi aate kabhi kabhi nai aisa kyu
-      }
-    }
-    //if all the pakcets are received and they are not same as the total packets then we have Get.back() here
-
-    // if (receivedPackets == totalPackets) {
-  }
-
   @override
   void dispose() {
-    udpReceiver?.close();
+    server.close();
     super.dispose();
   }
 
@@ -183,9 +191,49 @@ class _BleScreenState extends State<BleScreen> {
     ].request();
 
     if (status.values.every((status) => status.isGranted)) {
-      startScan();
+      bool servicesEnabled = await enableRequiredServices();
+      if (servicesEnabled) {
+        startScan();
+      } else {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Services Not Enabled'),
+              content: const Text(
+                  'Some required services could not be enabled. The app may not function correctly.'),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('OK'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
     } else {
-      print("Permissions not granted");
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Permissions Required'),
+            content: const Text(
+                'Please grant all required permissions to use this feature.'),
+            actions: <Widget>[
+              TextButton(
+                child: const Text('OK'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  checkPermissions(); // Retry after user interaction
+                },
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 
@@ -224,7 +272,6 @@ class _BleScreenState extends State<BleScreen> {
         if (connectionState == BluetoothConnectionState.connected) {
           setState(() {
             connectedDevice = device;
-            connectionProgress = 50;
           });
           await discoverServices(device);
           break;
@@ -233,7 +280,6 @@ class _BleScreenState extends State<BleScreen> {
         await device.connect();
         setState(() {
           connectedDevice = device;
-          connectionProgress = 50;
         });
         await discoverServices(device);
         break;
@@ -248,7 +294,6 @@ class _BleScreenState extends State<BleScreen> {
       print("Failed to connect after 3 attempts");
       setState(() {
         isLoading = false;
-        connectionProgress = 0;
       });
       Get.back();
     }
@@ -283,9 +328,7 @@ class _BleScreenState extends State<BleScreen> {
                 sendMessage("ready");
                 characteristic.onValueReceived.listen((value) {
                   print("Received value: $value");
-                  setState(() {
-                    connectionProgress = 75;
-                  });
+
                   handleReceivedValue(value);
                 });
               }
@@ -298,59 +341,12 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  // Future<void> getImage() async {
-  //   print('Getting image from device');
-  //   try {
-  //     //sendMessage("imageready");
-  //     //_connectToWifi();
-
-  //     final response =
-  //         await http.get(Uri.parse('http://192.168.1.1/image')).timeout(
-  //       const Duration(seconds: 30),
-  //       onTimeout: () {
-  //         throw TimeoutException(
-  //             'The connection has timed out, please try again!');
-  //       },
-  //     );
-
-  //     print('Response status: ${response.statusCode}');
-  //     print('Response headers: ${response.headers}');
-  //     print('Response body length: ${response.bodyBytes.length}');
-  //     if (response.statusCode == 200) {
-  //       setState(() {
-  //         _receivedImage = Uint8List.fromList(response.bodyBytes);
-  //       });
-  //       print('Image received successfully');
-  //     } else {
-  //       print('Failed to load image: ${response.statusCode}');
-  //       setState(() {
-  //         wifiStatus = 'Failed to load image: ${response.statusCode}';
-  //       });
-  //     }
-  //   } on SocketException catch (e) {
-  //     print('Socket Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'Network Error: Unable to connect to the device';
-  //     });
-  //   } on TimeoutException catch (e) {
-  //     print('Timeout Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'Connection timed out. Please try again.';
-  //     });
-  //   } catch (e) {
-  //     print('Error: $e');
-  //     setState(() {
-  //       wifiStatus = 'An error occurred: $e';
-  //     });
-  //   }
-  // }
-
   void handleReceivedValue(List<int> value) {
-    print("Received value: $value");
+    // print("Received value: $value");
     String receivedString = utf8.decode(value);
     if (ssid == null) {
       List<String> split = receivedString.split('|');
-      print("Received split: $split");
+      // print("Received split: $split");
 
       setState(() {
         ssid = split[0];
@@ -390,12 +386,15 @@ class _BleScreenState extends State<BleScreen> {
         if (isConnected) {
           setState(() {
             wifiStatus = 'Connected to $ssid';
-            connectionProgress = 100;
             isLoading = false;
           });
           Get.back();
           customLoadingOverlay("Getting image from device");
+          // String? wifiIP = await NetworkInfo().getWifiIP();
+          // print(wifiIP);
+          createAPI();
           sendMessage("connected");
+
           await Future.delayed(const Duration(
               seconds: 1)); // Give some time for the Ameba to process
           //getImage();
@@ -404,7 +403,6 @@ class _BleScreenState extends State<BleScreen> {
         } else {
           setState(() {
             wifiStatus = 'Failed to verify connection';
-            connectionProgress = 75;
           });
           Get.back();
           //if else mei hai
@@ -412,7 +410,6 @@ class _BleScreenState extends State<BleScreen> {
       } else {
         setState(() {
           wifiStatus = 'Failed to connect to $ssid';
-          connectionProgress = 75;
         });
         Get.back();
       }
@@ -420,7 +417,6 @@ class _BleScreenState extends State<BleScreen> {
       print("Detailed error: $e");
       setState(() {
         wifiStatus = 'Error connecting to Wi-Fi: $e';
-        connectionProgress = 75;
       });
       Get.back();
     } finally {
@@ -431,26 +427,35 @@ class _BleScreenState extends State<BleScreen> {
     }
   }
 
-  // Future<void> retryGetImage(int maxRetries) async {
-  //   for (int i = 0; i < maxRetries; i++) {
-  //     try {
-  //       await getImage();
-  //       if (_receivedImage != null) {
-  //         break; // Successfully got the image, exit the loop
-  //       }
-  //     } catch (e) {
-  //       print('Attempt ${i + 1} failed: $e');
-  //       if (i == maxRetries - 1) {
-  //         setState(() {
-  //           wifiStatus = 'Failed to get image after $maxRetries attempts';
-  //         });
-  //       } else {
-  //         await Future.delayed(
-  //             const Duration(seconds: 2)); // Wait before retrying
-  //       }
-  //     }
-  //   }
-  // }
+  Rx<Uint8List?> nwImage = Rx<Uint8List?>(null);
+
+  Future<void> createAPI() async {
+    //print my ip
+
+    server.get('/', (req, res) {
+      res.send("Wello Horld");
+    });
+    server.post('/upload', (req, res) async {
+      print('Received image upload request');
+      final body = await req.bodyAsJsonMap;
+      final uploadedFile = (body['file'] as HttpBodyFileUpload);
+      var fileBytes = (uploadedFile.content as List<int>);
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/temp_image.jpg');
+      await file.writeAsBytes(fileBytes);
+      if (fileBytes.isNotEmpty) {
+        setState(() {
+          _receivedImage = Uint8List.fromList(fileBytes);
+        });
+      }
+      if (!mounted) return;
+      _saveImage(context, file.path);
+      print('Image received');
+      res.send('Image received');
+    });
+
+    await server.listen();
+  }
 
   void sendMessage(String message) async {
     print('Sending message to device $message');
@@ -485,11 +490,7 @@ class _BleScreenState extends State<BleScreen> {
       bssid = null;
       wifiStatus = '';
       isLoading = false;
-      connectionProgress = 0;
       _receivedImage = null;
-      imageChunks.clear();
-      totalPackets = 0;
-      receivedPackets = 0;
     });
   }
 
@@ -499,32 +500,10 @@ class _BleScreenState extends State<BleScreen> {
       appBar: AppBar(
         title: const Text('BLE Demo'),
       ),
-      body:
-          // ? Center(
-          //     child: Column(
-          //       mainAxisAlignment: MainAxisAlignment.center,
-          //       children: [
-          //         Padding(
-          //           padding: const EdgeInsets.symmetric(horizontal: 50),
-          //           child: LinearProgressIndicator(
-          //             semanticsValue: "Connected ${connectionProgress / 100}",
-          //             value: connectionProgress / 100,
-          //             minHeight: 10,
-          //             backgroundColor: Colors.grey[300],
-          //             valueColor:
-          //                 const AlwaysStoppedAnimation<Color>(Colors.blue),
-          //           ),
-          //         ),
-          //         const SizedBox(height: 20),
-          //         const Text('Connecting...'), //
-          //       ],
-          //     ),
-          //   )
-          // :
-          Column(
+      body: Column(
         children: [
           ElevatedButton(
-            onPressed: startScan,
+            onPressed: () => {checkPermissions(), startScan()},
             child: const Text('Refresh'),
           ),
           Expanded(
@@ -550,20 +529,15 @@ class _BleScreenState extends State<BleScreen> {
                       const SizedBox(height: 10),
                       Text(wifiStatus),
                       const SizedBox(height: 20),
-                      // ElevatedButton(
-                      //   onPressed: () => retryGetImage(3),
-                      //   child: const Text('Get Image'),
-                      // ),
                       const SizedBox(height: 20),
-                      Text(
-                          'Received packets: $receivedPackets / $totalPackets'),
-                      if (_receivedImage != null)
+                      if (_receivedImage != null && _receivedImage!.isNotEmpty)
                         Image.memory(
                           _receivedImage!,
                           fit: BoxFit.cover,
                           semanticLabel:
                               'Image clicked from NAVI Smart Glasses',
-                        ),
+                          key: ValueKey(DateTime.now().millisecondsSinceEpoch),
+                        )
                     ],
                   ),
           ),
