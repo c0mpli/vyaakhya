@@ -6,15 +6,14 @@ class Api {
   final Dio _dio = Dio();
 
   // for image upload
-  static var oldbaseURL = "https://jashaws.chickenkiller.com/api1/";
 
   // for gpt backend
-  static var baseURL = "https://jashaws.chickenkiller.com/api2/";
+  static var baseURL = "https://ncahtiitdaws.chickenkiller.com/api2/";
 
   // endpoints(routes):
   static final loginRoute = "${baseURL}login";
   static final signupRoute = "${baseURL}register";
-  static final uploadImageRoute = "${oldbaseURL}upload";
+  static final uploadImageRoute = "${baseURL}upload";
   static final getDescriptionsRoute = "${baseURL}description";
   static final getAnswerRoute = "${baseURL}ask";
 

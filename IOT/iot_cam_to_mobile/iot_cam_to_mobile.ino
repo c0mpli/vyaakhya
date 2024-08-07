@@ -52,6 +52,24 @@ String filepath;
 WiFiUDP udp;
 
 
+// constants won't change. They're used here to set pin numbers:
+const int buttonPin = 2;  // the number of the pushbutton pin
+const int ledPin = 13;    // the number of the LED pin
+
+// Variables will change:
+int ledState = HIGH;        // the current state of the output pin
+int buttonState;            // the current reading from the input pin
+
+// the following variables are unsigned longs because the time, measured in
+// milliseconds, will quickly become a bigger number than can be stored in an int.
+bool isImageDescriptionShown = false, isImageClicked = false;
+unsigned long lastDebounceTime = 0;
+unsigned long debounceDelay = 30;  // Adjust this value if needed
+bool lastButtonState = LOW;
+bool buttonPressed = false;
+
+
+
 // Video capture variables
 VideoSetting config(VIDEO_FHD, CAM_FPS, VIDEO_JPEG, 1);
 uint32_t img_addr = 0;
@@ -253,6 +271,9 @@ void setup() {
     Camera.videoInit();
     Camera.channelBegin(CHANNEL);
 
+    pinMode(buttonPin, INPUT);
+
+
     // wifiServer.begin();
     // Serial.println("HTTP server started");
 
@@ -260,6 +281,36 @@ void setup() {
 }
 
 void loop() {
+    int reading = digitalRead(buttonPin);
+
+    if (reading != lastButtonState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        if (reading != buttonState) {
+            buttonState = reading;
+
+            if (buttonState == HIGH && !buttonPressed) {
+                Serial.println("Button Clicked");
+                buttonPressed = true;
+
+                // Add your button press actions here
+                if (!isImageDescriptionShown && deviceConnected) {
+                    Tx.writeString("buttonclicked");
+                    if (notify) {
+                        Tx.notify(0);
+                    }
+                    isImageClicked = true;
+                }
+            } else if (buttonState == LOW) {
+                buttonPressed = false;
+            }
+        }
+    }
+
+    lastButtonState = reading;
+
     if (BLE.connected(0) && !deviceConnected) {
         deviceConnected = true;
         Serial.println("Device connected. Waiting for ready message...");
@@ -283,6 +334,19 @@ void loop() {
         
         readyReceived = false; // Reset flag after sending credentials
     }
+
+    if(buttonState && !isImageDescriptionShown && deviceConnected){
+      Tx.writeString("buttonclicked");
+      if(notify){
+        Tx.notify(0);
+      }
+      isImageClicked = true;
+    }
+
+    if(isImageClicked && !isImageDescriptionShown && deviceConnected){
+
+    }
+    
 
     if(deviceConnected && connectedReceived){
 
