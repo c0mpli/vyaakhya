@@ -5,15 +5,14 @@ import 'package:http_parser/http_parser.dart';
 class Api {
   final Dio _dio = Dio();
 
-  // for image upload
-
   // for gpt backend
-  static var baseURL = "https://ncahtiitdaws.chickenkiller.com/api2/";
+  static var oldBaseURL = "https://jashaws.chickenkiller.com/api1/";
+  static var baseURL = "https://jashaws.chickenkiller.com/api2/";
 
   // endpoints(routes):
   static final loginRoute = "${baseURL}login";
   static final signupRoute = "${baseURL}register";
-  static final uploadImageRoute = "${baseURL}upload";
+  static final uploadImageRoute = "${oldBaseURL}upload";
   static final getDescriptionsRoute = "${baseURL}description";
   static final getAnswerRoute = "${baseURL}ask";
 

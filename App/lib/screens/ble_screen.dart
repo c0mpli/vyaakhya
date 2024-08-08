@@ -32,7 +32,9 @@ class _BleScreenState extends State<BleScreen> {
       localIp = "192.168.1.100",
       wifiName = "NAVI Smart Glasses";
   String wifiStatus = '';
-  bool isLoading = false, isConnectingWifi = false;
+  bool isLoading = false,
+      isConnectingWifi = false,
+      isButtonClickedReceived = false;
   Uint8List? _receivedImage;
   final Alfred server = Alfred();
   @override
@@ -145,7 +147,8 @@ class _BleScreenState extends State<BleScreen> {
   void _saveImage(BuildContext context, String imagePath) async {
     Position? userLocation;
     Get.back();
-    await WiFiForIoTPlugin.setEnabled(false);
+    await WiFiForIoTPlugin.disconnect();
+    //await WiFiForIoTPlugin.setEnabled(false);
     customLoadingOverlay("Loading description");
     try {
       userLocation = await determinePosition();
@@ -159,10 +162,21 @@ class _BleScreenState extends State<BleScreen> {
     String latitude = userLocation.latitude.toString();
     String longitude = userLocation.longitude.toString();
     print("Image path inside save image: $imagePath"); //ye log hi nai hua
+    //disconnect to the wifi
+    //sleep for 2 seconds
+    await Future.delayed(const Duration(seconds: 2));
+    bool isConnected = await WiFiForIoTPlugin.isConnected();
+    if (!isConnected) {
+      print("Not connected to wifi");
+      Get.back();
+      customSnackbar('Error', 'Failed to connect to Wi-Fi');
+      return;
+    }
     final response = await Api().uploadImage(imagePath, latitude, longitude);
     Get.back(closeOverlays: true);
     if (response != {}) {
       if (!context.mounted) return;
+      isButtonClickedReceived = false;
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -327,7 +341,7 @@ class _BleScreenState extends State<BleScreen> {
                 await characteristic.setNotifyValue(true);
                 sendMessage("ready");
                 characteristic.onValueReceived.listen((value) {
-                  print("Received value: $value");
+                  //print("Received value: $value");
 
                   handleReceivedValue(value);
                 });
@@ -344,6 +358,7 @@ class _BleScreenState extends State<BleScreen> {
   void handleReceivedValue(List<int> value) {
     // print("Received value: $value");
     String receivedString = utf8.decode(value);
+    print(receivedString);
     if (ssid == null) {
       List<String> split = receivedString.split('|');
       // print("Received split: $split");
@@ -352,6 +367,11 @@ class _BleScreenState extends State<BleScreen> {
         ssid = split[0];
         bssid = split[1];
       });
+      connectToWifi();
+    } else if (receivedString == "buttonclicked" && !isButtonClickedReceived) {
+      //print(receivedString);
+      isButtonClickedReceived = true;
+      print("Reconnecting to wifi");
       connectToWifi();
     }
   }

@@ -67,6 +67,9 @@ unsigned long lastDebounceTime = 0;
 unsigned long debounceDelay = 30;  // Adjust this value if needed
 bool lastButtonState = LOW;
 bool buttonPressed = false;
+const unsigned long buttonClickedDebounceDelay = 500; // 500ms debounce for button clicked message
+unsigned long lastButtonClickedTime = 0;
+bool buttonClickedMessageSent = false;
 
 
 
@@ -281,7 +284,7 @@ void setup() {
 }
 
 void loop() {
-    int reading = digitalRead(buttonPin);
+     int reading = digitalRead(buttonPin);
 
     if (reading != lastButtonState) {
         lastDebounceTime = millis();
@@ -294,17 +297,27 @@ void loop() {
             if (buttonState == HIGH && !buttonPressed) {
                 Serial.println("Button Clicked");
                 buttonPressed = true;
-
-                // Add your button press actions here
-                if (!isImageDescriptionShown && deviceConnected) {
-                    Tx.writeString("buttonclicked");
-                    if (notify) {
-                        Tx.notify(0);
-                    }
-                    isImageClicked = true;
+                Tx.writeString("buttonclicked");
+                if(notify){
+                  Tx.notify(0);
                 }
+                // // Add your button press actions here
+                // if (!isImageDescriptionShown && deviceConnected && !buttonClickedMessageSent) {
+                //     unsigned long currentTime = millis();
+                //     if (currentTime - lastButtonClickedTime > buttonClickedDebounceDelay) {
+                //         Tx.writeString("buttonclicked");
+                //         if (notify) {
+                //             Tx.notify(0);
+                //         }
+                //         isImageClicked = true;
+                //         buttonClickedMessageSent = true;
+                //         lastButtonClickedTime = currentTime;
+                //         Serial.println("Button clicked message sent");
+                //     }
+                // }
             } else if (buttonState == LOW) {
                 buttonPressed = false;
+                buttonClickedMessageSent = false;
             }
         }
     }
