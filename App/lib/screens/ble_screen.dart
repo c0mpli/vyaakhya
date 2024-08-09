@@ -165,18 +165,19 @@ class _BleScreenState extends State<BleScreen> {
     //disconnect to the wifi
     //sleep for 2 seconds
     await Future.delayed(const Duration(seconds: 2));
-    bool isConnected = await WiFiForIoTPlugin.isConnected();
-    if (!isConnected) {
-      print("Not connected to wifi");
-      Get.back();
-      customSnackbar('Error', 'Failed to connect to Wi-Fi');
-      return;
-    }
+    // bool isConnected = await WiFiForIoTPlugin.isConnected();
+    // if (!isConnected) {
+    //   print("Not connected to wifi");
+    //   Get.back();
+    //   customSnackbar('Error', 'Failed to connect to Wi-Fi');
+    //   return;
+    // }
     final response = await Api().uploadImage(imagePath, latitude, longitude);
     Get.back(closeOverlays: true);
     if (response != {}) {
       if (!context.mounted) return;
       isButtonClickedReceived = false;
+      sendMessage("done");
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -370,7 +371,9 @@ class _BleScreenState extends State<BleScreen> {
       connectToWifi();
     } else if (receivedString == "buttonclicked" && !isButtonClickedReceived) {
       //print(receivedString);
+      //Get.back();
       isButtonClickedReceived = true;
+      //customLoadingOverlay("Building connection");
       print("Reconnecting to wifi");
       connectToWifi();
     }
@@ -417,9 +420,6 @@ class _BleScreenState extends State<BleScreen> {
 
           await Future.delayed(const Duration(
               seconds: 1)); // Give some time for the Ameba to process
-          //getImage();
-          // await retryGetImage(3);
-          //getImage();
         } else {
           setState(() {
             wifiStatus = 'Failed to verify connection';

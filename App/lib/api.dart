@@ -8,6 +8,7 @@ class Api {
   // for gpt backend
   static var oldBaseURL = "https://jashaws.chickenkiller.com/api1/";
   static var baseURL = "https://jashaws.chickenkiller.com/api2/";
+  static var newBaseURL = "https://ncahtiitdaws.mooo.com/api2/";
 
   // endpoints(routes):
   static final loginRoute = "${baseURL}login";
